@@ -1,0 +1,57 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.venv
+venv
+
+# Development
+.pytest_cache
+.mypy_cache
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Build
+build/
+dist/
+*.egg-info/
+.egg
+
+# Test files
+test_*.py
+*_test.py
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local configuration
+mcp_config.json
+diagnose_*.sh
+update_cursor_config.sh
+
+# Documentation
+docs/
