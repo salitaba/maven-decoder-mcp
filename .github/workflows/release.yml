@@ -52,6 +52,7 @@ jobs:
   build:
     needs: test
     runs-on: ubuntu-latest
+    environment: production
     
     steps:
     - uses: actions/checkout@v4
@@ -132,12 +133,12 @@ jobs:
       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
       env:
         TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        TWINE_PASSWORD: ${{ vars.PYPI_API_TOKEN }}
       run: |
         echo "Checking environment variables..."
         echo "TWINE_USERNAME is set: ${{ env.TWINE_USERNAME != '' }}"
-        echo "PYPI_API_TOKEN is set: ${{ secrets.PYPI_API_TOKEN != '' }}"
-        echo "Token starts with pypi-: ${{ startsWith(secrets.PYPI_API_TOKEN, 'pypi-') }}"
+        echo "PYPI_API_TOKEN is set: ${{ vars.PYPI_API_TOKEN != '' }}"
+        echo "Token starts with pypi-: ${{ startsWith(vars.PYPI_API_TOKEN, 'pypi-') }}"
         
         # Alternative: Create .pypirc file
         echo "Creating .pypirc file..."
@@ -148,7 +149,7 @@ jobs:
         [pypi]
         repository = https://upload.pypi.org/legacy/
         username = __token__
-        password = ${{ secrets.PYPI_API_TOKEN }}
+        password = ${{ vars.PYPI_API_TOKEN }}
         EOF
         
         echo "Uploading with twine..."
