@@ -81,7 +81,7 @@ if __name__ == "__main__":
         },
         entry_points={
             "console_scripts": [
-                "maven-decoder-mcp=maven_decoder_server:main",
+                "maven-decoder-mcp=maven_decoder_mcp.maven_decoder_server:main",
                 "maven-decoder-setup=setup:main",
             ],
         },

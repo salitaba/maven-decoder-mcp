@@ -34,8 +34,8 @@ from pydantic import BaseModel
 import xmltodict
 
 # Import our custom modules
-from decompiler import JavaDecompiler
-from maven_analyzer import MavenDependencyAnalyzer
+from .decompiler import JavaDecompiler
+from .maven_analyzer import MavenDependencyAnalyzer
 
 # Configure logging
 import os

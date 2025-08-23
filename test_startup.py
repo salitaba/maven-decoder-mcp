@@ -12,7 +12,7 @@ import asyncio
 def test_import():
     """Test that the main module can be imported"""
     try:
-        from maven_decoder_server import MavenDecoderServer
+        from maven_decoder_mcp import MavenDecoderServer
         print("✅ Successfully imported MavenDecoderServer")
         return True
     except ImportError as e:
@@ -22,7 +22,7 @@ def test_import():
 def test_server_initialization():
     """Test that the server can be initialized"""
     try:
-        from maven_decoder_server import MavenDecoderServer
+        from maven_decoder_mcp import MavenDecoderServer
         server = MavenDecoderServer()
         print("✅ Successfully initialized MavenDecoderServer")
         return True
@@ -33,7 +33,7 @@ def test_server_initialization():
 async def test_basic_functionality():
     """Test basic functionality without external dependencies"""
     try:
-        from maven_decoder_server import MavenDecoderServer
+        from maven_decoder_mcp import MavenDecoderServer
         server = MavenDecoderServer()
         
         # Test that the server has the expected tools

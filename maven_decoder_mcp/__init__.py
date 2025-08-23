@@ -24,9 +24,9 @@ __version__ = "1.0.0"
 __author__ = "Your Name"
 __email__ = "your-email@example.com"
 
-from maven_decoder_server import MavenDecoderServer
-from decompiler import JavaDecompiler
-from maven_analyzer import MavenDependencyAnalyzer
+from .maven_decoder_server import MavenDecoderServer
+from .decompiler import JavaDecompiler
+from .maven_analyzer import MavenDependencyAnalyzer
 
 __all__ = [
     "MavenDecoderServer",
