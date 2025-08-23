@@ -31,10 +31,15 @@ classifiers = [
     "Topic :: Software Development :: Debuggers",
     "Topic :: Software Development :: Disassemblers",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
+    "mcp>=1.0.0",
     "pydantic>=2.0.0",
     "xmltodict>=0.13.0",
+    "javatools>=1.4.0",
+    "py4j>=0.10.9",
+    "aiofiles>=23.0.0",
+    "pathspec>=0.11.0",
     "requests>=2.25.0",
 ]
 
@@ -55,14 +60,14 @@ Repository = "https://github.com/salitaba/maven-decoder-mcp.git"
 "Bug Tracker" = "https://github.com/salitaba/maven-decoder-mcp/issues"
 
 [project.scripts]
-maven-decoder-mcp = "maven_decoder_server:main"
+maven-decoder-mcp = "maven_decoder_mcp.maven_decoder_server:main"
 maven-decoder-setup = "setup:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 
 [tool.setuptools.package-data]
-maven_decoder_mcp = ["decompilers/*.jar", "*.md"]
+"*" = ["decompilers/*.jar", "*.md"]
 
 [tool.black]
 line-length = 88
