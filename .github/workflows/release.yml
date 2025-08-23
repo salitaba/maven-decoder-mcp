@@ -38,6 +38,7 @@ jobs:
         pip install -r requirements.txt
         pip install "git+https://github.com/modelcontextprotocol/python-sdk.git"
         pip install pytest pytest-asyncio
+        pip install -e .
     
     - name: Setup decompilers
       run: ./setup_decompilers.sh
