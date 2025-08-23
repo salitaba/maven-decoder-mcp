@@ -1,0 +1,8 @@
+git+https://github.com/modelcontextprotocol/python-sdk.git
+pydantic>=2.0.0
+xmltodict>=0.13.0
+javatools>=1.4.0
+py4j>=0.10.9
+aiofiles>=23.0.0
+pathspec>=0.11.0
+requests>=2.25.0

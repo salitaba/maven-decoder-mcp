@@ -1,0 +1,61 @@
+{
+  "name": "maven-decoder-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for reading and decompiling Maven .m2 jar files with comprehensive Java project analysis",
+  "main": "index.js",
+  "bin": {
+    "maven-decoder-mcp": "./bin/maven-decoder-mcp.js"
+  },
+  "scripts": {
+    "install": "node scripts/install.js",
+    "test": "node scripts/test.js",
+    "start": "node bin/maven-decoder-mcp.js"
+  },
+  "keywords": [
+    "mcp",
+    "maven",
+    "java",
+    "decompiler",
+    "jar",
+    "analysis",
+    "cursor",
+    "ide",
+    "model-context-protocol"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "homepage": "https://github.com/salitaba/maven-decoder-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/salitaba/maven-decoder-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/salitaba/maven-decoder-mcp/issues"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "child_process": "^1.0.2",
+    "fs-extra": "^11.0.0",
+    "path": "^0.12.7"
+  },
+  "devDependencies": {},
+  "files": [
+    "bin/",
+    "scripts/",
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "preferGlobal": true,
+  "os": [
+    "darwin",
+    "linux", 
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

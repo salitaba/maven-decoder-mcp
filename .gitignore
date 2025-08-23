@@ -276,6 +276,9 @@ test_output/
 mcp_config.json
 .cursor/
 diagnose_*.txt
+cursor_mcp_config.json
+*_config.json
+!*_template.json
 
 # Local development files
 test_*.py
@@ -290,3 +293,7 @@ example_*.py
 maven-decoder-mcp-*.tgz
 maven-decoder-mcp-docker.tar.gz
 CHECKSUMS.txt
+
+# Generated package structure
+src/
+*.egg-info/

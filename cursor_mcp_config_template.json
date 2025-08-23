@@ -1,0 +1,6 @@
+{
+  "maven-decoder": {
+    "command": "maven-decoder-mcp",
+    "args": []
+  }
+}

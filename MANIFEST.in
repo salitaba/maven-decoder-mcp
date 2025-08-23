@@ -1,0 +1,10 @@
+include README.md
+include LICENSE
+include requirements.txt
+include setup_decompilers.sh
+include start_server.sh
+recursive-include src/maven_decoder_mcp/decompilers *.jar
+recursive-include src/maven_decoder_mcp *.py
+exclude test_*.py
+exclude diagnose_*.py
+exclude *.log
