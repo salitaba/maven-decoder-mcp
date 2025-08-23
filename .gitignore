@@ -281,7 +281,6 @@ cursor_mcp_config.json
 !*_template.json
 
 # Local development files
-test_*.py
 example_*.py
 
 # Backup files
