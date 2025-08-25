@@ -1,6 +1,6 @@
 {
   "maven-decoder": {
-    "command": "maven-decoder-mcp",
-    "args": []
+    "command": "uvx",
+    "args": ["maven-decoder-mcp"]
   }
 }

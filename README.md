@@ -35,16 +35,17 @@ curl -fsSL https://raw.githubusercontent.com/salitaba/maven-decoder-mcp/main/ins
 
 ### 📋 Installation Methods
 
-#### Method 1: Python/pip (Recommended)
+#### Method 1: uvx (Recommended)
 ```bash
-# Install the package
-pip install maven-decoder-mcp
+# Install uv (if not installed)
+curl -Ls https://astral.sh/uv/install.sh | sh
+# Ensure your shell PATH is updated (restart shell or eval as printed by installer)
 
-# Install MCP SDK
-pip install "git+https://github.com/modelcontextprotocol/python-sdk.git"
+# Run the server via uvx (isolated, fast, no venv needed)
+uvx maven-decoder-mcp
 
-# Run the server
-maven-decoder-mcp
+# Optional: pick a specific Python
+# uvx --python 3.12 maven-decoder-mcp
 ```
 
 #### Method 2: Node.js/npm
@@ -75,16 +76,14 @@ docker run --rm -it \
 git clone https://github.com/salitaba/maven-decoder-mcp.git
 cd maven-decoder-mcp
 
-# Option 4a: Using Virtual Environment
+# Option A: Using Virtual Environment
 python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pip install "git+https://github.com/modelcontextprotocol/python-sdk.git"
 ./setup_decompilers.sh
 
-# Option 4b: System-wide Installation
-pip3 install -r requirements.txt
-pip3 install "git+https://github.com/modelcontextprotocol/python-sdk.git"
+# Option B: System-wide Installation (not recommended)
 ./setup_decompilers.sh
 ```
 
@@ -96,8 +95,8 @@ Add to your `~/.cursor/mcp_servers.json`:
 ```json
 {
   "maven-decoder": {
-    "command": "maven-decoder-mcp",
-    "args": []
+    "command": "uvx",
+    "args": ["maven-decoder-mcp"]
   }
 }
 ```
@@ -212,6 +211,8 @@ ls ~/.m2/repository
 # Check logs
 maven-decoder-mcp --debug
 ```
+
+
 
 **Decompilation fails**
 ```bash
