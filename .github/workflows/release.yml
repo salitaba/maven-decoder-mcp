@@ -185,7 +185,28 @@ jobs:
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       run: |
-        npm publish maven-decoder-mcp-*.tgz
+        # Configure npm retry policy to better handle registry rate limits
+        npm config set fetch-retries 5
+        npm config set fetch-retry-factor 2
+        npm config set fetch-retry-mintimeout 20000
+        npm config set fetch-retry-maxtimeout 120000
+
+        # Exponential backoff retry for npm publish (handles occasional 429s)
+        ATTEMPTS=5
+        for i in $(seq 1 $ATTEMPTS); do
+          echo "npm publish attempt $i/$ATTEMPTS..."
+          if npm publish maven-decoder-mcp-*.tgz; then
+            echo "npm publish succeeded on attempt $i"
+            break
+          fi
+          if [ "$i" -eq "$ATTEMPTS" ]; then
+            echo "npm publish failed after $ATTEMPTS attempts"
+            exit 1
+          fi
+          SLEEP=$(( i * i * 15 ))
+          echo "Retrying in ${SLEEP}s..."
+          sleep "$SLEEP"
+        done
     
     - name: Create GitHub Release
       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
