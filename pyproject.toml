@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "maven-decoder-mcp"
-version = "1.0.0"
+version = "1.0.13"
 description = "MCP server for reading and decompiling Maven .m2 jar files with comprehensive Java project analysis"
 readme = "README.md"
 license = {text = "MIT"}
