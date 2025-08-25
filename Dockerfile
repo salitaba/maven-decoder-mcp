@@ -8,29 +8,28 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    openjdk-17-jdk \
+    default-jdk \
     wget \
     curl \
     unzip \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Set JAVA_HOME
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-ENV PATH=$JAVA_HOME/bin:$PATH
+# Java will be available on PATH via default-jdk
 
 # Create app directory
 WORKDIR /app
 
-# Copy package files
-COPY dist/maven_decoder_mcp-1.0.0-py3-none-any.whl .
-COPY requirements.txt .
+# Copy project files
+COPY requirements.txt ./
+COPY pyproject.toml README.md ./
+COPY maven_decoder_mcp ./maven_decoder_mcp
+COPY decompilers ./decompilers
+COPY setup_decompilers.sh ./
 
-# Install Python dependencies
-RUN pip install --no-cache-dir maven_decoder_mcp-1.0.0-py3-none-any.whl
-
-# Install MCP SDK directly from GitHub
-RUN pip install --no-cache-dir git+https://github.com/modelcontextprotocol/python-sdk.git
+# Install Python dependencies and package
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir .
 
 # Create non-root user
 RUN useradd -m -u 1000 mcpuser && \
@@ -43,7 +42,8 @@ USER mcpuser
 RUN mkdir -p /home/mcpuser/.m2/repository
 
 # Setup decompilers
-RUN maven-decoder-setup
+RUN chmod +x ./setup_decompilers.sh && \
+    ./setup_decompilers.sh
 
 # Expose port (if needed for future web interface)
 EXPOSE 8080
