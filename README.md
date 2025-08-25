@@ -67,7 +67,7 @@ maven-decoder-mcp
 docker run --rm -it \
   -v ~/.m2:/home/mcpuser/.m2 \
   -v $(pwd):/workspace \
-  maven-decoder/mcp-server:latest
+  ali79taba/maven-decoder-mcp:latest
 ```
 
 #### Method 4: From Source (Development)
@@ -255,7 +255,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ![GitHub Stars](https://img.shields.io/github/stars/salitaba/maven-decoder-mcp)
 ![PyPI Downloads](https://img.shields.io/pypi/dm/maven-decoder-mcp)
-![Docker Pulls](https://img.shields.io/docker/pulls/salitaba/mcp-server)
+![Docker Pulls](https://img.shields.io/docker/pulls/ali79taba/maven-decoder-mcp)
 
 ---
 
