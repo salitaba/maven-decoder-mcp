@@ -47,13 +47,14 @@ show_usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --method=METHOD    Installation method (pip|npm|docker|auto)"
+    echo "  --method=METHOD    Installation method (pip|uvx|npm|docker|auto)"
     echo "  --python=PATH      Path to Python executable"
     echo "  --global           Install globally (for pip/npm)"
     echo "  --help             Show this help message"
     echo ""
     echo "Methods:"
-    echo "  pip      Install via Python pip (recommended)"
+    echo "  uvx      Install via uvx (recommended, handles PEP 668 environments)"
+    echo "  pip      Install via Python pip"
     echo "  npm      Install via Node.js npm"
     echo "  docker   Run via Docker container"
     echo "  auto     Auto-detect best method (default)"
@@ -129,13 +130,25 @@ install_pip() {
     python_version=$($python_cmd --version 2>&1 | cut -d' ' -f2)
     print_status "Python version: $python_version"
     
-    # Install package
+    # Try pip installation first
     if [ "$GLOBAL_INSTALL" = "--global" ]; then
         print_status "Installing globally..."
-        $python_cmd -m pip install maven-decoder-mcp
+        if ! $python_cmd -m pip install maven-decoder-mcp 2>&1; then
+            print_warning "Pip installation failed (likely PEP 668 externally-managed-environment)"
+            print_status "Falling back to uvx installation..."
+            METHOD="uvx"
+            install_uvx
+            return
+        fi
     else
         print_status "Installing for current user..."
-        $python_cmd -m pip install --user maven-decoder-mcp
+        if ! $python_cmd -m pip install --user maven-decoder-mcp 2>&1; then
+            print_warning "Pip installation failed (likely PEP 668 externally-managed-environment)"
+            print_status "Falling back to uvx installation..."
+            METHOD="uvx"
+            install_uvx
+            return
+        fi
     fi
     
     # Install MCP SDK
@@ -148,6 +161,38 @@ install_pip() {
     
     print_success "Pip installation complete!"
     print_status "You can now run: maven-decoder-mcp"
+}
+
+# Install via uvx (handles PEP 668 environments)
+install_uvx() {
+    print_status "Installing Maven Decoder MCP via uvx..."
+    
+    # Check if uvx is available
+    if ! command_exists uvx; then
+        print_status "uvx not found. Installing uv..."
+        if ! curl -Ls https://astral.sh/uv/install.sh | sh; then
+            print_error "Failed to install uv. Please install manually: https://astral.sh/uv/install.sh"
+            exit 1
+        fi
+        # Add to PATH for current session
+        export PATH="$HOME/.local/bin:$PATH"
+    fi
+    
+    print_status "uvx version: $(uvx --version)"
+    
+    # Test that the package can be run via uvx
+    print_status "Testing uvx installation..."
+    if uvx maven-decoder-mcp --help >/dev/null 2>&1 & sleep 2 && kill $! 2>/dev/null; then
+        print_success "uvx installation test successful!"
+    else
+        print_error "uvx installation test failed"
+        exit 1
+    fi
+    
+    print_success "uvx installation complete!"
+    print_status "You can now run: uvx maven-decoder-mcp"
+    print_status "For IDE integration, use command: uvx"
+    print_status "With args: [maven-decoder-mcp]"
 }
 
 # Install via npm
@@ -209,7 +254,11 @@ EOF
 auto_install() {
     print_status "Auto-detecting best installation method..."
     
-    if find_python >/dev/null 2>&1; then
+    if command_exists uvx; then
+        print_status "uvx found - using uvx installation (recommended)"
+        METHOD="uvx"
+        install_uvx
+    elif find_python >/dev/null 2>&1; then
         print_status "Python found - using pip installation"
         METHOD="pip"
         install_pip
@@ -223,7 +272,7 @@ auto_install() {
         install_docker
     else
         print_error "No suitable package manager found!"
-        print_error "Please install one of: Python (pip), Node.js (npm), or Docker"
+        print_error "Please install one of: uvx, Python (pip), Node.js (npm), or Docker"
         exit 1
     fi
 }
@@ -235,6 +284,9 @@ main() {
     case $METHOD in
         pip)
             install_pip
+            ;;
+        uvx)
+            install_uvx
             ;;
         npm)
             install_npm
@@ -257,8 +309,13 @@ main() {
     echo ""
     print_status "Next steps:"
     print_status "1. Configure your IDE (e.g., Cursor) to use the MCP server"
-    print_status "2. Run 'maven-decoder-mcp' to start the server"
-    print_status "3. Visit https://github.com/YOUR_USERNAME/maven-decoder-mcp for documentation"
+    if [ "$METHOD" = "uvx" ]; then
+        print_status "2. Run 'uvx maven-decoder-mcp' to start the server"
+        print_status "3. For IDE config, use command: uvx, args: [maven-decoder-mcp]"
+    else
+        print_status "2. Run 'maven-decoder-mcp' to start the server"
+    fi
+    print_status "4. Visit https://github.com/YOUR_USERNAME/maven-decoder-mcp for documentation"
 }
 
 # Run main function
