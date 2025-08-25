@@ -315,7 +315,7 @@ main() {
     else
         print_status "2. Run 'maven-decoder-mcp' to start the server"
     fi
-    print_status "4. Visit https://github.com/YOUR_USERNAME/maven-decoder-mcp for documentation"
+    print_status "4. Visit https://github.com/salitaba/maven-decoder-mcp for documentation"
 }
 
 # Run main function
