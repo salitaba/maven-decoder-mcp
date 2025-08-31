@@ -47,6 +47,7 @@ jobs:
     - name: Run pagination and summarization tests
       run: |
         echo "🧪 Running pagination and summarization tests..."
+        python -c "import sys; print('Python executable:', sys.executable)"
         python run_tests.py
     
     - name: Run pytest test suite

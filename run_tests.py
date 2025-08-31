@@ -13,6 +13,12 @@ def run_tests():
     print("🧪 Running Pagination and Summarization Tests")
     print("=" * 50)
     
+    # Debug information
+    print(f"Python executable: {sys.executable}")
+    print(f"Python version: {sys.version}")
+    print(f"Working directory: {os.getcwd()}")
+    print()
+    
     # Check if pytest is available
     try:
         import pytest
@@ -30,9 +36,13 @@ def run_tests():
     print(f"📁 Running tests from: {test_dir}")
     print()
     
-    # Run the tests
+    # Run the tests - use system Python if sys.executable is an AppImage
+    python_executable = sys.executable
+    if "AppImage" in python_executable:
+        python_executable = "/usr/bin/python3"
+    
     result = subprocess.run([
-        "/usr/bin/python3", "-m", "pytest",
+        python_executable, "-m", "pytest",
         str(test_dir / "test_pagination.py"),
         "-v",
         "--tb=short"
@@ -43,6 +53,11 @@ def run_tests():
         return True
     else:
         print("\n❌ Some tests failed!")
+        print(f"Return code: {result.returncode}")
+        print("STDOUT:")
+        print(result.stdout)
+        print("STDERR:")
+        print(result.stderr)
         return False
 
 def run_simple_test():
