@@ -33,7 +33,7 @@ jobs:
         pip install setuptools wheel
         pip install -r requirements.txt
         pip install "git+https://github.com/modelcontextprotocol/python-sdk.git"
-        pip install pytest pytest-asyncio
+        pip install pytest pytest-asyncio pytest-cov
         pip install -e .
     
     - name: Setup decompilers
