@@ -18,6 +18,8 @@ A comprehensive Model Context Protocol (MCP) server for analyzing Maven jar file
 - **Repository Navigation**: Browse and explore the local Maven repository structure
 - **Metadata Parsing**: Extract and parse Maven POM files and metadata
 - **Service Discovery**: Find and analyze Java services and SPI implementations
+- **Response Management**: Intelligent pagination and summarization for large responses
+- **Method Extraction**: Extract specific methods from large Java classes
 
 ## 📦 Installation
 
@@ -120,6 +122,7 @@ The server runs as a standard MCP server and can be integrated with any MCP-comp
 | `find_dependents` | Find artifacts that depend on a specific artifact |
 | `get_version_info` | Get all available versions of an artifact |
 | `analyze_jar_structure` | Analyze overall jar structure and metadata |
+| `extract_method_info` | Extract specific method information from Java classes |
 
 ## 💡 Usage Examples
 
@@ -143,11 +146,45 @@ The server runs as a standard MCP server and can be integrated with any MCP-comp
 "Show me all public methods in the Jackson ObjectMapper class"
 ```
 
+### Working with Large Responses
+```
+"List all Spring classes with pagination (page 2, 10 items per page)"
+"Extract source code for a large class with summarization"
+"Get method information for specific patterns in a class"
+```
+
+## 🔄 Response Management
+
+### Pagination Support
+The server automatically handles large responses through intelligent pagination:
+
+- **Automatic Detection**: Responses exceeding 50KB are automatically paginated
+- **Configurable Page Size**: Default 20 items per page, customizable per request
+- **Pagination Metadata**: Each response includes pagination information
+- **Supported Tools**: `list_artifacts`, `extract_class_info`, `search_classes`, `get_dependencies`, `find_dependents`, `get_version_info`
+
+### Summarization Features
+Large text content is automatically summarized to improve readability:
+
+- **Smart Summarization**: Preserves important parts (package declarations, method signatures, closing braces)
+- **Configurable Limits**: Default 10KB text limit, customizable
+- **Java-Specific**: Optimized for Java source code structure
+- **Metadata Preservation**: Original structure and metadata are maintained
+
+### Method Extraction
+New tool for targeted access to specific methods:
+
+- **Pattern Matching**: Use regex patterns to find specific methods
+- **Limited Results**: Control the number of methods returned
+- **Full Context**: Includes method signatures, bodies, and line numbers
+- **Efficient Processing**: Only extracts requested methods, not entire classes
+
 ## 🏗️ Architecture
 
 The server is built with a modular architecture:
 
 - **`MavenDecoderServer`**: Main MCP server implementation
+- **`ResponseManager`**: Handles pagination and summarization
 - **`JavaDecompiler`**: Handles multiple decompilation strategies
 - **`MavenDependencyAnalyzer`**: Analyzes Maven dependencies and metadata
 - **Decompilers**: CFR, Procyon, Fernflower, and javap integration
@@ -189,6 +226,10 @@ docker run --rm -it maven-decoder-mcp
 ### Environment Variables
 - `MAVEN_HOME`: Custom Maven repository location (default: `~/.m2/repository`)
 - `MCP_LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
+- `MCP_MAX_RESPONSE_SIZE`: Maximum response size in bytes (default: 50000)
+- `MCP_MAX_ITEMS_PER_PAGE`: Default items per page (default: 20)
+- `MCP_MAX_TEXT_LENGTH`: Maximum text length before summarization (default: 10000)
+- `MCP_MAX_LINES`: Maximum lines before summarization (default: 500)
 
 ### Advanced Configuration
 The server automatically detects and configures:

@@ -61,6 +61,16 @@ jobs:
       run: |
         python test_startup.py
         python -c "from maven_decoder_mcp import MavenDecoderServer; print('✅ Package import successful')"
+        
+    - name: Run pagination and summarization tests
+      run: |
+        echo "🧪 Running pagination and summarization tests..."
+        python run_tests.py
+        
+    - name: Run pytest tests
+      run: |
+        echo "🧪 Running pytest test suite..."
+        python -m pytest tests/ -v --tb=short
 
   build:
     needs: test
@@ -128,6 +138,8 @@ jobs:
         - 📦 Complete Maven integration and dependency analysis
         - 🔗 Cross-reference analysis and usage examples
         - 🚀 Multiple installation methods (pip, npm, Docker)
+        - 📄 Intelligent pagination and summarization for large responses
+        - 🎯 Method extraction for targeted analysis
         
         ## Installation
         
@@ -151,6 +163,23 @@ jobs:
         docker run --rm -it \
           -v ~/.m2:/home/mcpuser/.m2 \
           maven-decoder/mcp-server:latest
+        ```
+        
+        ## New in This Release
+        
+        ### Pagination and Summarization
+        - **Smart Response Management**: Automatically handles large responses through pagination and summarization
+        - **Configurable Limits**: Environment variables for customizing response size limits
+        - **Java-Optimized Summarization**: Preserves important parts of Java source code
+        - **Method Extraction**: New tool for extracting specific methods from large classes
+        
+        ### Configuration
+        ```bash
+        # Response size limits
+        MCP_MAX_RESPONSE_SIZE=50000      # Max response size in bytes
+        MCP_MAX_ITEMS_PER_PAGE=20        # Default items per page
+        MCP_MAX_TEXT_LENGTH=10000        # Max text length before summarization
+        MCP_MAX_LINES=500                # Max lines before summarization
         ```
         EOF
     

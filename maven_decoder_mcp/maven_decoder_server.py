@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 import logging
 import tempfile
 import subprocess
+import re
 
 from mcp.server import Server
 from mcp.server.models import InitializationOptions
@@ -50,6 +51,118 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+class ResponseManager:
+    """Manages large responses with pagination and summarization"""
+    
+    def __init__(self, max_response_size: Optional[int] = None, max_items_per_page: Optional[int] = None, 
+                 max_text_length: Optional[int] = None, max_lines: Optional[int] = None):
+        self.max_response_size = max_response_size or int(os.getenv('MCP_MAX_RESPONSE_SIZE', '50000'))
+        self.max_items_per_page = max_items_per_page or int(os.getenv('MCP_MAX_ITEMS_PER_PAGE', '20'))
+        self.max_text_length = max_text_length or int(os.getenv('MCP_MAX_TEXT_LENGTH', '10000'))
+        self.max_lines = max_lines or int(os.getenv('MCP_MAX_LINES', '500'))
+    
+    def paginate_response(self, data: Dict[str, Any], page: int = 1, 
+                         items_per_page: Optional[int] = None) -> Dict[str, Any]:
+        """Paginate a response with items"""
+        if items_per_page is None:
+            items_per_page = self.max_items_per_page
+        
+        # Handle different data structures
+        if 'classes' in data:
+            items = data['classes']
+            key = 'classes'
+        elif 'matches' in data:
+            items = data['matches']
+            key = 'matches'
+        elif 'dependencies' in data:
+            items = data['dependencies']
+            key = 'dependencies'
+        else:
+            # If no known structure, return as is
+            return data
+        
+        total_items = len(items)
+        total_pages = (total_items + items_per_page - 1) // items_per_page
+        
+        start_idx = (page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        
+        paginated_items = items[start_idx:end_idx]
+        
+        result = data.copy()
+        result[key] = paginated_items
+        result['pagination'] = {
+            'page': page,
+            'total_pages': total_pages,
+            'items_per_page': items_per_page,
+            'total_items': total_items,
+            'showing_items': f"{start_idx + 1}-{min(end_idx, total_items)}"
+        }
+        
+        return result
+    
+    def summarize_large_text(self, text: str, max_length: Optional[int] = None) -> str:
+        """Summarize large text content"""
+        if max_length is None:
+            max_length = self.max_text_length
+            
+        if len(text) <= max_length:
+            return text
+        
+        # For Java code, try to keep important parts
+        lines = text.split('\n')
+        if len(lines) <= self.max_lines:
+            return text
+        
+        # Keep first 20 lines (usually package, imports, class declaration)
+        # Keep last 10 lines (usually closing braces)
+        # Keep method signatures in between
+        summary_lines = []
+        
+        # Add header
+        summary_lines.append("// SUMMARY: Large class content (showing key parts)")
+        summary_lines.append(f"// Total lines: {len(lines)}")
+        summary_lines.append("// Showing: package/imports, method signatures, and closing braces")
+        summary_lines.append("")
+        
+        # Add first 20 lines
+        summary_lines.extend(lines[:20])
+        
+        # Find method signatures (lines with public/private/protected + method name)
+        method_lines = []
+        for i, line in enumerate(lines[20:-10]):
+            stripped = line.strip()
+            if (re.match(r'^\s*(public|private|protected|static|final)\s+', stripped) and 
+                '(' in stripped and ')' in stripped and 
+                not stripped.startswith('//') and not stripped.startswith('/*')):
+                method_lines.append((i + 20, line))
+        
+        # Add some method signatures (up to 10)
+        if method_lines:
+            summary_lines.append("")
+            summary_lines.append("// ... key method signatures ...")
+            for idx, line in method_lines[:10]:
+                summary_lines.append(f"// Line {idx + 1}: {line.strip()}")
+        
+        # Add closing braces
+        summary_lines.append("")
+        summary_lines.append("// ... closing braces ...")
+        summary_lines.extend(lines[-10:])
+        
+        summary_lines.append("")
+        summary_lines.append(f"// Use pagination or specific method extraction for full content")
+        
+        return '\n'.join(summary_lines)
+    
+    def should_paginate(self, data: Dict[str, Any]) -> bool:
+        """Check if response should be paginated"""
+        response_str = json.dumps(data, indent=2)
+        return len(response_str) > self.max_response_size
+    
+    def should_summarize(self, text: str) -> bool:
+        """Check if text should be summarized"""
+        return len(text) > self.max_text_length
+
 class MavenDecoderServer:
     """MCP Server for Maven jar file analysis"""
     
@@ -57,6 +170,7 @@ class MavenDecoderServer:
         logger.info("Initializing Maven Decoder MCP Server...")
         self.server = Server("maven-decoder")
         self.maven_home = Path.home() / ".m2" / "repository"
+        self.response_manager = ResponseManager()
         logger.info(f"Maven repository location: {self.maven_home}")
         
         if not self.maven_home.exists():
@@ -95,7 +209,9 @@ class MavenDecoderServer:
                             "group_id": {"type": "string", "description": "Filter by group ID (e.g., 'org.springframework')"},
                             "artifact_id": {"type": "string", "description": "Filter by artifact ID (e.g., 'spring-core')"},
                             "version": {"type": "string", "description": "Filter by version (e.g., '5.3.21')"},
-                            "limit": {"type": "integer", "default": 50, "description": "Maximum number of artifacts to return"}
+                            "limit": {"type": "integer", "default": 50, "description": "Maximum number of artifacts to return"},
+                            "page": {"type": "integer", "default": 1, "description": "Page number for pagination"},
+                            "items_per_page": {"type": "integer", "default": 20, "description": "Items per page"}
                         },
                         "additionalProperties": False
                     }
@@ -110,7 +226,8 @@ class MavenDecoderServer:
                             "artifact_id": {"type": "string", "description": "Maven artifact ID"},
                             "version": {"type": "string", "description": "Maven version"},
                             "include_bytecode": {"type": "boolean", "default": False, "description": "Include bytecode analysis"},
-                            "include_manifest": {"type": "boolean", "default": True, "description": "Include JAR manifest"}
+                            "include_manifest": {"type": "boolean", "default": True, "description": "Include JAR manifest"},
+                            "summarize_large_content": {"type": "boolean", "default": True, "description": "Summarize large content automatically"}
                         },
                         "required": ["group_id", "artifact_id", "version"],
                         "additionalProperties": False
@@ -118,7 +235,7 @@ class MavenDecoderServer:
                 ),
                 Tool(
                     name="extract_class_info",
-                    description="Extract detailed information about Java classes in a jar",
+                    description="Get detailed information about Java classes in a jar",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -127,7 +244,10 @@ class MavenDecoderServer:
                             "version": {"type": "string", "description": "Maven version"},
                             "class_pattern": {"type": "string", "description": "Pattern to match class names (regex supported)"},
                             "include_methods": {"type": "boolean", "default": True, "description": "Include method signatures"},
-                            "include_fields": {"type": "boolean", "default": True, "description": "Include field information"}
+                            "include_fields": {"type": "boolean", "default": True, "description": "Include field information"},
+                            "page": {"type": "integer", "default": 1, "description": "Page number for pagination"},
+                            "items_per_page": {"type": "integer", "default": 20, "description": "Items per page"},
+                            "summarize_large_content": {"type": "boolean", "default": True, "description": "Summarize large content automatically"}
                         },
                         "required": ["group_id", "artifact_id", "version"],
                         "additionalProperties": False
@@ -142,7 +262,9 @@ class MavenDecoderServer:
                             "group_id": {"type": "string", "description": "Maven group ID"},
                             "artifact_id": {"type": "string", "description": "Maven artifact ID"},
                             "version": {"type": "string", "description": "Maven version"},
-                            "include_transitive": {"type": "boolean", "default": False, "description": "Include transitive dependencies"}
+                            "include_transitive": {"type": "boolean", "default": False, "description": "Include transitive dependencies"},
+                            "page": {"type": "integer", "default": 1, "description": "Page number for pagination"},
+                            "items_per_page": {"type": "integer", "default": 20, "description": "Items per page"}
                         },
                         "required": ["group_id", "artifact_id", "version"],
                         "additionalProperties": False
@@ -157,7 +279,9 @@ class MavenDecoderServer:
                             "class_name": {"type": "string", "description": "Class name to search for (supports wildcards)"},
                             "package_pattern": {"type": "string", "description": "Package pattern to filter by"},
                             "annotation": {"type": "string", "description": "Search for classes with specific annotation"},
-                            "limit": {"type": "integer", "default": 100, "description": "Maximum results to return"}
+                            "limit": {"type": "integer", "default": 100, "description": "Maximum results to return"},
+                            "page": {"type": "integer", "default": 1, "description": "Page number for pagination"},
+                            "items_per_page": {"type": "integer", "default": 20, "description": "Items per page"}
                         },
                         "additionalProperties": False
                     }
@@ -172,7 +296,9 @@ class MavenDecoderServer:
                             "artifact_id": {"type": "string", "description": "Maven artifact ID"},
                             "version": {"type": "string", "description": "Maven version"},
                             "class_name": {"type": "string", "description": "Fully qualified class name"},
-                            "prefer_sources": {"type": "boolean", "default": True, "description": "Prefer source jar over decompilation"}
+                            "prefer_sources": {"type": "boolean", "default": True, "description": "Prefer source jar over decompilation"},
+                            "summarize_large_content": {"type": "boolean", "default": True, "description": "Summarize large content automatically"},
+                            "max_lines": {"type": "integer", "default": 500, "description": "Maximum lines to return (0 for all)"}
                         },
                         "required": ["group_id", "artifact_id", "version", "class_name"],
                         "additionalProperties": False
@@ -188,7 +314,8 @@ class MavenDecoderServer:
                             "artifact_id": {"type": "string", "description": "Maven artifact ID"},
                             "version1": {"type": "string", "description": "First version to compare"},
                             "version2": {"type": "string", "description": "Second version to compare"},
-                            "compare_api": {"type": "boolean", "default": True, "description": "Compare public API changes"}
+                            "compare_api": {"type": "boolean", "default": True, "description": "Compare public API changes"},
+                            "summarize_large_content": {"type": "boolean", "default": True, "description": "Summarize large content automatically"}
                         },
                         "required": ["group_id", "artifact_id", "version1", "version2"],
                         "additionalProperties": False
@@ -202,7 +329,10 @@ class MavenDecoderServer:
                         "properties": {
                             "class_name": {"type": "string", "description": "Class name to find usage for"},
                             "method_name": {"type": "string", "description": "Method name to find usage for"},
-                            "search_tests": {"type": "boolean", "default": True, "description": "Search in test jars"}
+                            "search_tests": {"type": "boolean", "default": True, "description": "Search in test jars"},
+                            "limit": {"type": "integer", "default": 50, "description": "Maximum results to return"},
+                            "page": {"type": "integer", "default": 1, "description": "Page number for pagination"},
+                            "items_per_page": {"type": "integer", "default": 20, "description": "Items per page"}
                         },
                         "required": ["class_name"],
                         "additionalProperties": False
@@ -216,7 +346,9 @@ class MavenDecoderServer:
                         "properties": {
                             "group_id": {"type": "string", "description": "Maven group ID"},
                             "artifact_id": {"type": "string", "description": "Maven artifact ID"},
-                            "version": {"type": "string", "description": "Maven version"}
+                            "version": {"type": "string", "description": "Maven version"},
+                            "max_depth": {"type": "integer", "default": 3, "description": "Maximum depth to show"},
+                            "summarize_large_content": {"type": "boolean", "default": True, "description": "Summarize large content automatically"}
                         },
                         "required": ["group_id", "artifact_id", "version"],
                         "additionalProperties": False
@@ -230,7 +362,10 @@ class MavenDecoderServer:
                         "properties": {
                             "group_id": {"type": "string", "description": "Target group ID"},
                             "artifact_id": {"type": "string", "description": "Target artifact ID"},
-                            "version": {"type": "string", "description": "Specific version to search for (optional)"}
+                            "version": {"type": "string", "description": "Specific version to search for (optional)"},
+                            "limit": {"type": "integer", "default": 100, "description": "Maximum results to return"},
+                            "page": {"type": "integer", "default": 1, "description": "Page number for pagination"},
+                            "items_per_page": {"type": "integer", "default": 20, "description": "Items per page"}
                         },
                         "required": ["group_id", "artifact_id"],
                         "additionalProperties": False
@@ -243,7 +378,10 @@ class MavenDecoderServer:
                         "type": "object",
                         "properties": {
                             "group_id": {"type": "string", "description": "Maven group ID"},
-                            "artifact_id": {"type": "string", "description": "Maven artifact ID"}
+                            "artifact_id": {"type": "string", "description": "Maven artifact ID"},
+                            "limit": {"type": "integer", "default": 50, "description": "Maximum versions to return"},
+                            "page": {"type": "integer", "default": 1, "description": "Page number for pagination"},
+                            "items_per_page": {"type": "integer", "default": 20, "description": "Items per page"}
                         },
                         "required": ["group_id", "artifact_id"],
                         "additionalProperties": False
@@ -257,9 +395,28 @@ class MavenDecoderServer:
                         "properties": {
                             "group_id": {"type": "string", "description": "Maven group ID"},
                             "artifact_id": {"type": "string", "description": "Maven artifact ID"},
-                            "version": {"type": "string", "description": "Maven version"}
+                            "version": {"type": "string", "description": "Maven version"},
+                            "summarize_large_content": {"type": "boolean", "default": True, "description": "Summarize large content automatically"}
                         },
                         "required": ["group_id", "artifact_id", "version"],
+                        "additionalProperties": False
+                    }
+                ),
+                Tool(
+                    name="extract_method_info",
+                    description="Extract specific method information from a Java class",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "group_id": {"type": "string", "description": "Maven group ID"},
+                            "artifact_id": {"type": "string", "description": "Maven artifact ID"},
+                            "version": {"type": "string", "description": "Maven version"},
+                            "class_name": {"type": "string", "description": "Fully qualified class name"},
+                            "method_pattern": {"type": "string", "description": "Pattern to match method names (regex supported)"},
+                            "include_bytecode": {"type": "boolean", "default": False, "description": "Include bytecode analysis"},
+                            "max_methods": {"type": "integer", "default": 10, "description": "Maximum number of methods to return"}
+                        },
+                        "required": ["group_id", "artifact_id", "version", "class_name"],
                         "additionalProperties": False
                     }
                 )
@@ -296,6 +453,8 @@ class MavenDecoderServer:
                     return await self._get_version_info(**arguments)
                 elif name == "analyze_jar_structure":
                     return await self._analyze_jar_structure(**arguments)
+                elif name == "extract_method_info":
+                    return await self._extract_method_info(**arguments)
                 else:
                     raise ValueError(f"Unknown tool: {name}")
             except Exception as e:
@@ -305,9 +464,9 @@ class MavenDecoderServer:
     async def _list_artifacts(self, group_id: Optional[str] = None, 
                             artifact_id: Optional[str] = None, 
                             version: Optional[str] = None, 
-                            limit: int = 50) -> List[TextContent]:
+                            limit: int = 50, page: int = 1, items_per_page: int = 20) -> List[TextContent]:
         """List Maven artifacts with optional filtering"""
-        logger.debug(f"Listing artifacts with filters: group_id={group_id}, artifact_id={artifact_id}, version={version}, limit={limit}")
+        logger.debug(f"Listing artifacts with filters: group_id={group_id}, artifact_id={artifact_id}, version={version}, limit={limit}, page={page}, items_per_page={items_per_page}")
         artifacts = []
         count = 0
         
@@ -378,7 +537,8 @@ class MavenDecoderServer:
         return str(relative).replace(os.sep, '.')
     
     async def _analyze_jar(self, group_id: str, artifact_id: str, version: str,
-                          include_bytecode: bool = False, include_manifest: bool = True) -> List[TextContent]:
+                          include_bytecode: bool = False, include_manifest: bool = True,
+                          summarize_large_content: bool = True) -> List[TextContent]:
         """Analyze a specific jar file"""
         jar_path = self._get_jar_path(group_id, artifact_id, version)
         if not jar_path or not jar_path.exists():
@@ -421,6 +581,10 @@ class MavenDecoderServer:
                 if pom_entries:
                     pom_content = jar.read(pom_entries[0]).decode('utf-8', errors='ignore')
                     analysis["maven_metadata"] = self._parse_pom(pom_content)
+            
+            if summarize_large_content and self.response_manager.should_summarize(json.dumps(analysis, indent=2)):
+                analysis["content"] = self.response_manager.summarize_large_text(json.dumps(analysis, indent=2))
+                analysis["summarized"] = True
             
             return [TextContent(type="text", text=json.dumps(analysis, indent=2))]
             
@@ -493,7 +657,9 @@ class MavenDecoderServer:
     async def _extract_class_info(self, group_id: str, artifact_id: str, version: str,
                                  class_pattern: Optional[str] = None,
                                  include_methods: bool = True,
-                                 include_fields: bool = True) -> List[TextContent]:
+                                 include_fields: bool = True,
+                                 page: int = 1, items_per_page: int = 20,
+                                 summarize_large_content: bool = True) -> List[TextContent]:
         """Extract detailed class information"""
         jar_path = self._get_jar_path(group_id, artifact_id, version)
         if not jar_path or not jar_path.exists():
@@ -538,18 +704,37 @@ class MavenDecoderServer:
                 "classes": classes_info
             }
             
+            # Apply pagination if needed
+            if self.response_manager.should_paginate(result):
+                result = self.response_manager.paginate_response(result, page, items_per_page)
+            
+            # Apply summarization if needed
+            if summarize_large_content and self.response_manager.should_summarize(json.dumps(result, indent=2)):
+                result["content"] = self.response_manager.summarize_large_text(json.dumps(result, indent=2))
+                result["summarized"] = True
+            
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
         except Exception as e:
             return [TextContent(type="text", text=f"Error extracting class info: {str(e)}")]
     
     async def _get_dependencies(self, group_id: str, artifact_id: str, version: str,
-                              include_transitive: bool = False) -> List[TextContent]:
+                              include_transitive: bool = False,
+                              page: int = 1, items_per_page: int = 20) -> List[TextContent]:
         """Get Maven dependencies with enhanced analysis"""
         try:
             analysis = self.dependency_analyzer.analyze_dependencies(
                 group_id, artifact_id, version, include_transitive, max_depth=3
             )
+            
+            # Apply pagination if needed
+            if self.response_manager.should_paginate(analysis):
+                analysis = self.response_manager.paginate_response(analysis, page, items_per_page)
+            
+            # Apply summarization if needed
+            if self.response_manager.should_summarize(json.dumps(analysis, indent=2)):
+                analysis["content"] = self.response_manager.summarize_large_text(json.dumps(analysis, indent=2))
+                analysis["summarized"] = True
             
             return [TextContent(type="text", text=json.dumps(analysis, indent=2))]
             
@@ -559,7 +744,7 @@ class MavenDecoderServer:
     async def _search_classes(self, class_name: Optional[str] = None,
                             package_pattern: Optional[str] = None,
                             annotation: Optional[str] = None,
-                            limit: int = 100) -> List[TextContent]:
+                            limit: int = 100, page: int = 1, items_per_page: int = 20) -> List[TextContent]:
         """Search for classes across all jars"""
         import re
         matches = []
@@ -610,6 +795,15 @@ class MavenDecoderServer:
                 "matches": matches
             }
             
+            # Apply pagination if needed
+            if self.response_manager.should_paginate(result):
+                result = self.response_manager.paginate_response(result, page, items_per_page)
+            
+            # Apply summarization if needed
+            if self.response_manager.should_summarize(json.dumps(result, indent=2)):
+                result["content"] = self.response_manager.summarize_large_text(json.dumps(result, indent=2))
+                result["summarized"] = True
+            
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
         except Exception as e:
@@ -637,7 +831,8 @@ class MavenDecoderServer:
         return {"group_id": "unknown", "artifact_id": "unknown", "version": "unknown"}
     
     async def _extract_source_code(self, group_id: str, artifact_id: str, version: str,
-                                 class_name: str, prefer_sources: bool = True) -> List[TextContent]:
+                                 class_name: str, prefer_sources: bool = True,
+                                 summarize_large_content: bool = True, max_lines: int = 500) -> List[TextContent]:
         """Extract source code from jar or decompile"""
         # First try to find sources jar
         if prefer_sources:
@@ -651,6 +846,9 @@ class MavenDecoderServer:
                         "artifact": f"{group_id}:{artifact_id}:{version}",
                         "code": source_code
                     }
+                    if summarize_large_content and self.response_manager.should_summarize(result["code"]):
+                        result["code"] = self.response_manager.summarize_large_text(result["code"])
+                        result["summarized"] = True
                     return [TextContent(type="text", text=json.dumps(result, indent=2))]
         
         # Fall back to decompilation
@@ -667,6 +865,9 @@ class MavenDecoderServer:
                 "code": decompiled_code or "Failed to decompile class",
                 "available_decompilers": list(self.decompiler.available_decompilers.keys())
             }
+            if summarize_large_content and self.response_manager.should_summarize(result["code"]):
+                result["code"] = self.response_manager.summarize_large_text(result["code"])
+                result["summarized"] = True
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
         except Exception as e:
@@ -692,7 +893,8 @@ class MavenDecoderServer:
     
     async def _compare_versions(self, group_id: str, artifact_id: str,
                               version1: str, version2: str,
-                              compare_api: bool = True) -> List[TextContent]:
+                              compare_api: bool = True,
+                              summarize_large_content: bool = True) -> List[TextContent]:
         """Compare different versions of the same artifact"""
         # Get both jar paths
         jar1 = self._get_jar_path(group_id, artifact_id, version1)
@@ -730,6 +932,10 @@ class MavenDecoderServer:
             if compare_api:
                 comparison["comparison"]["api_changes"] = "API comparison not yet implemented"
             
+            if summarize_large_content and self.response_manager.should_summarize(json.dumps(comparison, indent=2)):
+                comparison["content"] = self.response_manager.summarize_large_text(json.dumps(comparison, indent=2))
+                comparison["summarized"] = True
+            
             return [TextContent(type="text", text=json.dumps(comparison, indent=2))]
             
         except Exception as e:
@@ -737,21 +943,26 @@ class MavenDecoderServer:
     
     async def _find_usage_examples(self, class_name: str,
                                  method_name: Optional[str] = None,
-                                 search_tests: bool = True) -> List[TextContent]:
+                                 search_tests: bool = True,
+                                 limit: int = 50, page: int = 1, items_per_page: int = 20) -> List[TextContent]:
         """Find usage examples in test jars"""
         # TODO: Implement usage search in test jars and source code
         return [TextContent(type="text", text="Usage example search not yet implemented")]
     
-    async def _get_dependency_tree(self, group_id: str, artifact_id: str, version: str) -> List[TextContent]:
+    async def _get_dependency_tree(self, group_id: str, artifact_id: str, version: str,
+                                  max_depth: int = 3, summarize_large_content: bool = True) -> List[TextContent]:
         """Get complete dependency tree"""
         try:
             tree = self.dependency_analyzer.find_dependency_tree(group_id, artifact_id, version)
+            if summarize_large_content and self.response_manager.should_summarize(json.dumps(tree, indent=2)):
+                tree = self.response_manager.summarize_large_text(json.dumps(tree, indent=2))
             return [TextContent(type="text", text=json.dumps(tree, indent=2))]
         except Exception as e:
             return [TextContent(type="text", text=f"Error getting dependency tree: {str(e)}")]
     
     async def _find_dependents(self, group_id: str, artifact_id: str, 
-                             version: Optional[str] = None) -> List[TextContent]:
+                             version: Optional[str] = None,
+                             limit: int = 100, page: int = 1, items_per_page: int = 20) -> List[TextContent]:
         """Find artifacts that depend on the target"""
         try:
             dependents = self.dependency_analyzer.find_dependents(group_id, artifact_id, version)
@@ -760,19 +971,37 @@ class MavenDecoderServer:
                 "dependents": dependents,
                 "total_dependents": len(dependents)
             }
+            # Apply pagination if needed
+            if self.response_manager.should_paginate(result):
+                result = self.response_manager.paginate_response(result, page, items_per_page)
+            
+            # Apply summarization if needed
+            if self.response_manager.should_summarize(json.dumps(result, indent=2)):
+                result["content"] = self.response_manager.summarize_large_text(json.dumps(result, indent=2))
+                result["summarized"] = True
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
         except Exception as e:
             return [TextContent(type="text", text=f"Error finding dependents: {str(e)}")]
     
-    async def _get_version_info(self, group_id: str, artifact_id: str) -> List[TextContent]:
+    async def _get_version_info(self, group_id: str, artifact_id: str,
+                                limit: int = 50, page: int = 1, items_per_page: int = 20) -> List[TextContent]:
         """Get version information for an artifact"""
         try:
             version_info = self.dependency_analyzer.get_version_info(group_id, artifact_id)
+            # Apply pagination if needed
+            if self.response_manager.should_paginate(version_info):
+                version_info = self.response_manager.paginate_response(version_info, page, items_per_page)
+            
+            # Apply summarization if needed
+            if self.response_manager.should_summarize(json.dumps(version_info, indent=2)):
+                version_info["content"] = self.response_manager.summarize_large_text(json.dumps(version_info, indent=2))
+                version_info["summarized"] = True
             return [TextContent(type="text", text=json.dumps(version_info, indent=2))]
         except Exception as e:
             return [TextContent(type="text", text=f"Error getting version info: {str(e)}")]
     
-    async def _analyze_jar_structure(self, group_id: str, artifact_id: str, version: str) -> List[TextContent]:
+    async def _analyze_jar_structure(self, group_id: str, artifact_id: str, version: str,
+                                   summarize_large_content: bool = True) -> List[TextContent]:
         """Analyze jar file structure"""
         jar_path = self._get_jar_path(group_id, artifact_id, version)
         if not jar_path or not jar_path.exists():
@@ -780,9 +1009,141 @@ class MavenDecoderServer:
         
         try:
             analysis = self.decompiler.analyze_jar_structure(jar_path)
+            if summarize_large_content and self.response_manager.should_summarize(json.dumps(analysis, indent=2)):
+                analysis["content"] = self.response_manager.summarize_large_text(json.dumps(analysis, indent=2))
+                analysis["summarized"] = True
             return [TextContent(type="text", text=json.dumps(analysis, indent=2))]
         except Exception as e:
             return [TextContent(type="text", text=f"Error analyzing jar structure: {str(e)}")]
+    
+    async def _extract_method_info(self, group_id: str, artifact_id: str, version: str,
+                                 class_name: str, method_pattern: Optional[str] = None,
+                                 include_bytecode: bool = False, max_methods: int = 10) -> List[TextContent]:
+        """Extract specific method information from a Java class"""
+        jar_path = self._get_jar_path(group_id, artifact_id, version)
+        if not jar_path or not jar_path.exists():
+            return [TextContent(type="text", text=f"Jar file not found: {group_id}:{artifact_id}:{version}")]
+        
+        try:
+            # Get the full source code first
+            source_code = await self._extract_source_code_internal(jar_path, class_name)
+            if not source_code:
+                return [TextContent(type="text", text=f"Could not extract source code for class: {class_name}")]
+            
+            # Parse methods from source code
+            methods = self._extract_methods_from_source(source_code, method_pattern, max_methods)
+            
+            result = {
+                "class_name": class_name,
+                "artifact": f"{group_id}:{artifact_id}:{version}",
+                "total_methods_found": len(methods),
+                "methods": methods,
+                "method_pattern": method_pattern or "all methods"
+            }
+            
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+            
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error extracting method info: {str(e)}")]
+    
+    def _extract_methods_from_source(self, source_code: str, method_pattern: Optional[str] = None, 
+                                   max_methods: int = 10) -> List[Dict[str, Any]]:
+        """Extract method information from Java source code"""
+        import re
+        
+        methods = []
+        lines = source_code.split('\n')
+        
+        # Pattern to match method declarations
+        method_pattern_regex = re.compile(
+            r'^\s*(public|private|protected|static|final)?\s*'
+            r'(?:<[^>]+>\s+)?'  # Generic type parameters
+            r'(\w+(?:<[^>]+>)?)\s+'  # Return type
+            r'(\w+)\s*'  # Method name
+            r'\([^)]*\)'  # Parameters
+        )
+        
+        current_method = None
+        brace_count = 0
+        method_start_line = 0
+        
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            
+            # Skip comments and empty lines
+            if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*') or not stripped:
+                continue
+            
+            # Check if this line starts a method
+            match = method_pattern_regex.match(stripped)
+            if match and not current_method:
+                method_name = match.group(3)
+                
+                # Apply pattern filter if provided
+                if method_pattern and not re.search(method_pattern, method_name):
+                    continue
+                
+                current_method = {
+                    "name": method_name,
+                    "return_type": match.group(2),
+                    "modifiers": match.group(1) or "",
+                    "signature": stripped,
+                    "start_line": i + 1,
+                    "body": []
+                }
+                method_start_line = i + 1
+                brace_count = 0
+                continue
+            
+            # If we're in a method, collect the body
+            if current_method:
+                current_method["body"].append(line)
+                
+                # Count braces to find method end
+                brace_count += line.count('{') - line.count('}')
+                
+                if brace_count <= 0 and line.strip().endswith('}'):
+                    # Method ended
+                    current_method["end_line"] = i + 1
+                    current_method["body"] = '\n'.join(current_method["body"])
+                    
+                    methods.append(current_method)
+                    current_method = None
+                    
+                    if len(methods) >= max_methods:
+                        break
+        
+        return methods
+    
+    async def _extract_source_code_internal(self, jar_path: Path, class_name: str) -> Optional[str]:
+        """Internal method to extract source code without response formatting"""
+        try:
+            # First try to find sources jar
+            sources_jar = self._get_sources_jar_path_from_jar(jar_path)
+            if sources_jar and sources_jar.exists():
+                source_code = self._extract_from_sources_jar(sources_jar, class_name)
+                if source_code:
+                    return source_code
+            
+            # Fall back to decompilation
+            return self.decompiler.decompile_class(jar_path, class_name)
+            
+        except Exception:
+            return None
+    
+    def _get_sources_jar_path_from_jar(self, jar_path: Path) -> Optional[Path]:
+        """Get path to sources jar file from main jar path"""
+        jar_dir = jar_path.parent
+        jar_name = jar_path.stem
+        
+        # Remove version suffix to get artifact name
+        if '-' in jar_name:
+            artifact_name = jar_name.rsplit('-', 1)[0]
+            version = jar_name.rsplit('-', 1)[1]
+            sources_jar = jar_dir / f"{artifact_name}-{version}-sources.jar"
+            return sources_jar if sources_jar.exists() else None
+        
+        return None
 
     async def run(self):
         """Run the MCP server"""

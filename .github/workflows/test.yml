@@ -1,0 +1,155 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', 3.11, 3.12]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Set up Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install setuptools wheel
+        pip install -r requirements.txt
+        pip install "git+https://github.com/modelcontextprotocol/python-sdk.git"
+        pip install pytest pytest-asyncio
+        pip install -e .
+    
+    - name: Setup decompilers
+      run: ./setup_decompilers.sh
+    
+    - name: Run basic tests
+      run: |
+        python test_startup.py
+        python -c "from maven_decoder_mcp import MavenDecoderServer; print('✅ Package import successful')"
+    
+    - name: Run pagination and summarization tests
+      run: |
+        echo "🧪 Running pagination and summarization tests..."
+        python run_tests.py
+    
+    - name: Run pytest test suite
+      run: |
+        echo "🧪 Running pytest test suite..."
+        python -m pytest tests/ -v --tb=short --cov=maven_decoder_mcp --cov-report=xml
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  test-pagination-features:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Set up Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install "git+https://github.com/modelcontextprotocol/python-sdk.git"
+        pip install pytest pytest-asyncio
+        pip install -e .
+    
+    - name: Test ResponseManager functionality
+      run: |
+        echo "🔍 Testing ResponseManager functionality..."
+        python -c "
+        from maven_decoder_mcp.maven_decoder_server import ResponseManager
+        
+        # Test pagination
+        rm = ResponseManager(max_response_size=1000, max_items_per_page=5)
+        data = {'classes': [{'name': f'Class{i}'} for i in range(20)]}
+        result = rm.paginate_response(data, page=2, items_per_page=5)
+        assert len(result['classes']) == 5
+        assert result['pagination']['page'] == 2
+        print('✅ Pagination test passed')
+        
+        # Test summarization
+        long_text = '\\n'.join(['public class Test {'] + [f'    private String field{i};' for i in range(50)] + ['}'])
+        summarized = rm.summarize_large_text(long_text)
+        assert len(summarized) < len(long_text)
+        assert 'SUMMARY' in summarized
+        print('✅ Summarization test passed')
+        "
+    
+    - name: Test environment variable configuration
+      env:
+        MCP_MAX_RESPONSE_SIZE: '2000'
+        MCP_MAX_ITEMS_PER_PAGE: '10'
+        MCP_MAX_TEXT_LENGTH: '1000'
+        MCP_MAX_LINES: '20'
+      run: |
+        echo "🔧 Testing environment variable configuration..."
+        python -c "
+        from maven_decoder_mcp.maven_decoder_server import ResponseManager
+        
+        rm = ResponseManager()
+        assert rm.max_response_size == 2000
+        assert rm.max_items_per_page == 10
+        assert rm.max_text_length == 1000
+        assert rm.max_lines == 20
+        print('✅ Environment variable configuration test passed')
+        "
+    
+    - name: Test tool registration
+      run: |
+        echo "🛠️ Testing tool registration..."
+        python -c "
+        from maven_decoder_mcp.maven_decoder_server import MavenDecoderServer
+        
+        server = MavenDecoderServer()
+        tool_names = [t.name for t in server.server._tools]
+        
+        # Check pagination tools
+        pagination_tools = ['list_artifacts', 'extract_class_info', 'search_classes', 'get_dependencies', 'find_dependents', 'get_version_info']
+        for tool in pagination_tools:
+            assert tool in tool_names, f'Missing pagination tool: {tool}'
+        
+        # Check summarization tools
+        summarization_tools = ['analyze_jar', 'extract_class_info', 'extract_source_code', 'compare_versions', 'get_dependency_tree', 'analyze_jar_structure']
+        for tool in summarization_tools:
+            assert tool in tool_names, f'Missing summarization tool: {tool}'
+        
+        # Check new method extraction tool
+        assert 'extract_method_info' in tool_names, 'Missing extract_method_info tool'
+        
+        print('✅ Tool registration test passed')
+        "
