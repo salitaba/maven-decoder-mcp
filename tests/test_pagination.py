@@ -9,8 +9,6 @@ import os
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
 
-pytestmark = pytest.mark.asyncio
-
 from maven_decoder_mcp.maven_decoder_server import MavenDecoderServer, ResponseManager
 
 
@@ -192,6 +190,7 @@ class TestMavenDecoderServerPagination:
             mock_home.return_value = Path("/mock/home")
             self.server = MavenDecoderServer()
     
+    @pytest.mark.asyncio
     @patch('maven_decoder_mcp.maven_decoder_server.Path.exists')
     @patch('maven_decoder_mcp.maven_decoder_server.zipfile.ZipFile')
     async def test_extract_class_info_pagination(self, mock_zipfile, mock_exists):
@@ -221,6 +220,7 @@ class TestMavenDecoderServerPagination:
         assert data["pagination"]["items_per_page"] == 10
         assert len(data["classes"]) == 10
     
+    @pytest.mark.asyncio
     async def test_search_classes_pagination(self):
         """Test search_classes with pagination"""
         # This test is simplified to avoid complex mocking issues
@@ -237,6 +237,7 @@ class TestMavenDecoderServerPagination:
         assert 'page' in sig.parameters
         assert 'items_per_page' in sig.parameters
     
+    @pytest.mark.asyncio
     @patch('maven_decoder_mcp.maven_decoder_server.Path.exists')
     async def test_extract_source_code_summarization(self, mock_exists):
         """Test extract_source_code with summarization"""
@@ -268,6 +269,7 @@ class TestMavenDecoderServerPagination:
             assert data["summarized"] is True
             assert len(data["code"]) < len(long_code)
     
+    @pytest.mark.asyncio
     @patch('maven_decoder_mcp.maven_decoder_server.Path.exists')
     async def test_extract_method_info(self, mock_exists):
         """Test the new extract_method_info tool"""
