@@ -1,5 +1,7 @@
 # Maven Decoder MCP Server
 
+[![skills.sh](https://skills.sh/b/salitaba/maven-decoder-mcp)](https://skills.sh/salitaba/maven-decoder-mcp)
+
 A comprehensive Model Context Protocol (MCP) server for analyzing Maven jar files in your local repository (`~/.m2`). This server provides powerful tools for agentic coding assistance in Java projects, enabling AI agents to understand dependencies, analyze bytecode, extract source code, and navigate the Maven ecosystem.
 
 ## 🚀 Features
@@ -105,6 +107,16 @@ Add to your `~/.cursor/mcp_servers.json`:
 
 ### For Other MCP Clients
 The server runs as a standard MCP server and can be integrated with any MCP-compatible client.
+
+## 🧠 AI Agent Skill
+
+This repository includes a `maven-code-search` agent skill that tells AI coding agents when and how to use this MCP for searching installed Maven package code.
+
+```bash
+npx skills add https://github.com/salitaba/maven-decoder-mcp --skill maven-code-search
+```
+
+The skill is located at `skills/maven-code-search` and is ready for skills.sh indexing after the repository is pushed.
 
 ## 🛠️ Available Tools
 

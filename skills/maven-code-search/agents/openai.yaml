@@ -1,0 +1,14 @@
+interface:
+  display_name: "Maven Code Search"
+  short_description: "Search installed Maven package code"
+  default_prompt: "Use $maven-code-search to inspect installed Maven dependencies and search package code."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "maven-decoder"
+      description: "Maven Decoder MCP server for searching and decompiling artifacts from the local Maven repository"
+      transport: "stdio"
+
+policy:
+  allow_implicit_invocation: true
