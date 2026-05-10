@@ -109,19 +109,18 @@ class ResponseManager:
     def summarize_large_text(self, text: str, max_length: Optional[int] = None) -> str:
         """Summarize large text content"""
         if max_length is None:
-            max_length = self.max_text_length
+            max_length = min(self.max_text_length, self.max_response_size)
             
-        if len(text) <= max_length:
-            return text
-        
         # For Java code, try to keep important parts
         lines = text.split('\n')
-        if len(lines) <= self.max_lines:
+        if len(text) <= max_length and len(lines) <= self.max_lines:
             return text
         
         # Keep first 20 lines (usually package, imports, class declaration)
         # Keep last 10 lines (usually closing braces)
         # Keep method signatures in between
+        head_count = min(20, len(lines))
+        tail_count = min(10, max(0, len(lines) - head_count))
         summary_lines = []
         
         # Add header
@@ -130,17 +129,17 @@ class ResponseManager:
         summary_lines.append("// Showing: package/imports, method signatures, and closing braces")
         summary_lines.append("")
         
-        # Add first 20 lines
-        summary_lines.extend(lines[:20])
+        # Add first lines
+        summary_lines.extend(lines[:head_count])
         
         # Find method signatures (lines with public/private/protected + method name)
         method_lines = []
-        for i, line in enumerate(lines[20:-10]):
+        for i, line in enumerate(lines[head_count:len(lines) - tail_count]):
             stripped = line.strip()
             if (re.match(r'^\s*(public|private|protected|static|final)\s+', stripped) and 
                 '(' in stripped and ')' in stripped and 
                 not stripped.startswith('//') and not stripped.startswith('/*')):
-                method_lines.append((i + 20, line))
+                method_lines.append((i + head_count, line))
         
         # Add some method signatures (up to 10)
         if method_lines:
@@ -150,9 +149,10 @@ class ResponseManager:
                 summary_lines.append(f"// Line {idx + 1}: {line.strip()}")
         
         # Add closing braces
-        summary_lines.append("")
-        summary_lines.append("// ... closing braces ...")
-        summary_lines.extend(lines[-10:])
+        if tail_count:
+            summary_lines.append("")
+            summary_lines.append("// ... closing braces ...")
+            summary_lines.extend(lines[-tail_count:])
         
         summary_lines.append("")
         summary_lines.append(f"// Use pagination or specific method extraction for full content")
@@ -166,7 +166,7 @@ class ResponseManager:
     
     def should_summarize(self, text: str) -> bool:
         """Check if text should be summarized"""
-        return len(text) > self.max_text_length
+        return len(text) > min(self.max_text_length, self.max_response_size)
 
 class MavenDecoderServer:
     """MCP Server for Maven jar file analysis"""
