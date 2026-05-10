@@ -18,12 +18,17 @@ import tempfile
 import subprocess
 import re
 
-from mcp.server import Server
+try:
+    from mcp.server.lowlevel import Server
+except ImportError:
+    from mcp.server import Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import (
     Resource,
     Tool,
+    ListToolsResult,
+    CallToolResult,
     TextContent,
     ImageContent,
     EmbeddedResource,
@@ -169,6 +174,7 @@ class MavenDecoderServer:
     def __init__(self):
         logger.info("Initializing Maven Decoder MCP Server...")
         self.server = Server("maven-decoder")
+        self._ensure_server_decorators()
         self.maven_home = Path.home() / ".m2" / "repository"
         self.response_manager = ResponseManager()
         logger.info(f"Maven repository location: {self.maven_home}")
@@ -191,15 +197,48 @@ class MavenDecoderServer:
         logger.info("Setting up MCP server handlers...")
         self.setup_handlers()
         logger.info("Maven Decoder MCP Server initialization complete!")
+
+    def _ensure_server_decorators(self):
+        """Provide decorator registration for newer MCP SDK request handlers."""
+        if hasattr(self.server, "list_tools") and hasattr(self.server, "call_tool"):
+            return
+
+        if not hasattr(self.server, "_add_request_handler"):
+            raise RuntimeError("Unsupported MCP Server API: missing tool registration handlers")
+
+        if not hasattr(self.server, "list_tools"):
+            def list_tools():
+                def decorator(func):
+                    async def handler(ctx, params):
+                        return ListToolsResult(tools=await func())
+
+                    self.server._add_request_handler("tools/list", handler)
+                    return func
+
+                return decorator
+
+            self.server.list_tools = list_tools
+
+        if not hasattr(self.server, "call_tool"):
+            def call_tool():
+                def decorator(func):
+                    async def handler(ctx, params):
+                        content = await func(params.name, params.arguments or {})
+                        if isinstance(content, CallToolResult):
+                            return content
+                        return CallToolResult(content=content)
+
+                    self.server._add_request_handler("tools/call", handler)
+                    return func
+
+                return decorator
+
+            self.server.call_tool = call_tool
     
     def setup_handlers(self):
         """Setup MCP server handlers"""
         
-        @self.server.list_tools()
-        async def handle_list_tools() -> List[Tool]:
-            """List available tools for Maven jar analysis"""
-            logger.info("MCP client requested tool list")
-            tools = [
+        tools = [
                 Tool(
                     name="list_artifacts",
                     description="List all Maven artifacts in the local repository with optional filtering",
@@ -440,6 +479,12 @@ class MavenDecoderServer:
                     }
                 )
             ]
+        self.server._tools = tools
+
+        @self.server.list_tools()
+        async def handle_list_tools() -> List[Tool]:
+            """List available tools for Maven jar analysis"""
+            logger.info("MCP client requested tool list")
             logger.info(f"Registered {len(tools)} tools: {[tool.name for tool in tools]}")
             return tools
         
