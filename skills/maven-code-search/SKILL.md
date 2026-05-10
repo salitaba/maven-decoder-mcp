@@ -27,9 +27,11 @@ Use `get_version_info` when the user asks which versions of an artifact are inst
 
 Use `search_classes` when the user knows a class name, simple type name, wildcard, or package but not the artifact that contains it.
 
-Use `extract_class_info` when the user needs constructors, fields, annotations, or method signatures for classes in a known artifact.
+Use `extract_class_info` when the user needs constructors, fields, annotations, or method signatures for classes in a known artifact. If sources are missing, this tool still returns bytecode-backed fields and methods through the MCP, so do not shell out to `javap` for the same information.
 
 Use `extract_source_code` when the user needs implementation details. Set `prefer_sources` to true unless there is a specific reason to force decompilation.
+
+Use `extract_jar_resource` when the user needs files embedded in the jar, such as `.proto` files, service descriptors, or Maven metadata. Use `analyze_jar` first when you need to discover resource paths. Do not shell out to `jar tf` just to list or read jar entries.
 
 Use `extract_method_info` for targeted method inspection instead of pulling a large class.
 
@@ -51,6 +53,8 @@ For "Show me the methods on `RestTemplate`", first resolve the artifact/version 
 
 For "How does this library implement retry?", search for likely classes by package or class name, then use `extract_method_info` or `extract_source_code` on the most relevant classes.
 
+For generated protobuf classes with no sources jar, call `extract_class_info` on the generated class to recover parsed methods and fields. If the jar includes `.proto` resources or descriptor metadata, use `analyze_jar` and `extract_jar_resource` to inspect those resources through the MCP.
+
 For "Why do I have two versions?", use `get_dependency_tree`, `find_dependents`, and `compare_versions` as needed. Tie the answer back to the project's declared dependencies.
 
 ## Answer Guidelines
@@ -62,6 +66,7 @@ Keep responses grounded in MCP results. Include:
 - Whether source came from a source jar or decompilation when that distinction is visible.
 - Pagination status when results are incomplete.
 - Any local-cache limitation, such as an artifact not being installed.
+- For compiled-only classes, say that the class details came from bytecode-backed MCP inspection rather than claiming the source jar was available.
 
 Do not paste huge decompiled files into chat. Summarize the relevant behavior and include only small snippets when they are necessary to explain the answer.
 

@@ -6,6 +6,7 @@ Tests for pagination and summarization features
 import pytest
 import json
 import os
+import zipfile
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
 
@@ -219,6 +220,57 @@ class TestMavenDecoderServerPagination:
         assert data["pagination"]["page"] == 2
         assert data["pagination"]["items_per_page"] == 10
         assert len(data["classes"]) == 10
+
+    @pytest.mark.asyncio
+    async def test_extract_class_info_uses_bytecode_analysis(self, tmp_path):
+        """Test extract_class_info returns parsed bytecode-backed members."""
+        jar_path = tmp_path / "test-1.0.0.jar"
+        with zipfile.ZipFile(jar_path, "w") as jar:
+            jar.writestr("com/example/Test.class", b"\xca\xfe\xba\xbe\x00\x00\x00\x3d")
+
+        bytecode_info = {
+            "class_signature": "public class com.example.Test",
+            "bytecode": {"major_version": 61, "minor_version": 0, "java_version": "17"},
+            "javap_available": True,
+            "fields": [{"name": "value", "signature": "private java.lang.String value"}],
+            "methods": [{"name": "getValue", "signature": "public java.lang.String getValue()"}],
+        }
+
+        with patch.object(self.server, "_get_jar_path", return_value=jar_path), \
+             patch.object(self.server.decompiler, "analyze_class", return_value=bytecode_info) as mock_analyze:
+            result = await self.server._extract_class_info(
+                group_id="com.example",
+                artifact_id="test",
+                version="1.0.0",
+                class_pattern="Test",
+            )
+
+        data = json.loads(result[0].text)
+        assert data["classes"][0]["methods"][0]["name"] == "getValue"
+        assert data["classes"][0]["fields"][0]["name"] == "value"
+        assert data["classes"][0]["class_signature"] == "public class com.example.Test"
+        mock_analyze.assert_called_once_with(jar_path, "com.example.Test", include_bytecode=False)
+
+    @pytest.mark.asyncio
+    async def test_extract_jar_resource_reads_text_resources(self, tmp_path):
+        """Test extracting text resources from a jar without shelling out to jar."""
+        jar_path = tmp_path / "test-1.0.0.jar"
+        with zipfile.ZipFile(jar_path, "w") as jar:
+            jar.writestr("META-INF/proto/example.proto", 'syntax = "proto3";\nmessage Example {}\n')
+            jar.writestr("com/example/Test.class", b"\xca\xfe\xba\xbe")
+
+        with patch.object(self.server, "_get_jar_path", return_value=jar_path):
+            result = await self.server._extract_jar_resource(
+                group_id="com.example",
+                artifact_id="test",
+                version="1.0.0",
+                resource_pattern=r"\.proto$",
+            )
+
+        data = json.loads(result[0].text)
+        assert data["total_matches"] == 1
+        assert data["resources"][0]["path"] == "META-INF/proto/example.proto"
+        assert "message Example" in data["resources"][0]["content"]
     
     @pytest.mark.asyncio
     async def test_search_classes_pagination(self):

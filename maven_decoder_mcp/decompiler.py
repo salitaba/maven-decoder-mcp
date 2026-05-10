@@ -120,6 +120,142 @@ class JavaDecompiler:
         except Exception as e:
             logger.error(f"Decompilation failed: {e}")
             return self._fallback_class_info(jar_path, class_name)
+
+    def analyze_class(self, jar_path: Path, class_name: str,
+                      include_bytecode: bool = False) -> Dict[str, Any]:
+        """Analyze a class file and return parsed javap fields/methods."""
+        class_file_path = class_name.replace('.', '/') + '.class'
+        analysis: Dict[str, Any] = {
+            "class_name": class_name,
+            "class_file": class_file_path,
+            "fields": [],
+            "methods": [],
+            "javap_available": "javap" in self.available_decompilers,
+        }
+
+        try:
+            with zipfile.ZipFile(jar_path, 'r') as jar:
+                if class_file_path not in jar.namelist():
+                    analysis["error"] = f"Class file not found in jar: {class_file_path}"
+                    return analysis
+
+                class_data = jar.read(class_file_path)
+                analysis["size_bytes"] = len(class_data)
+
+                if class_data[:4] == b'\xca\xfe\xba\xbe':
+                    minor_version = int.from_bytes(class_data[4:6], 'big')
+                    major_version = int.from_bytes(class_data[6:8], 'big')
+                    analysis["bytecode"] = {
+                        "major_version": major_version,
+                        "minor_version": minor_version,
+                        "java_version": self._map_bytecode_version(major_version),
+                    }
+        except Exception as e:
+            analysis["error"] = f"Error reading class file: {e}"
+            return analysis
+
+        javap_output = self._run_javap_on_classpath(jar_path, class_name, include_bytecode)
+        if not javap_output:
+            analysis["javap_error"] = "javap did not return class details"
+            return analysis
+
+        parsed = self._parse_javap_output(javap_output, class_name)
+        analysis.update(parsed)
+
+        if include_bytecode:
+            analysis["javap_output"] = javap_output
+
+        return analysis
+
+    def _run_javap_on_classpath(self, jar_path: Path, class_name: str,
+                                include_bytecode: bool = False) -> Optional[str]:
+        """Run javap against a class using the jar as the classpath."""
+        if "javap" not in self.available_decompilers:
+            return None
+
+        args = ['javap', '-classpath', str(jar_path), '-p', '-s', '-constants']
+        if include_bytecode:
+            args.extend(['-c', '-v'])
+        args.append(class_name)
+
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                return result.stdout
+            logger.warning(f"javap classpath analysis failed: {result.stderr}")
+        except Exception as e:
+            logger.error(f"javap classpath analysis failed: {e}")
+
+        return None
+
+    def _parse_javap_output(self, output: str, class_name: str) -> Dict[str, Any]:
+        """Parse javap output into class signature, fields, and methods."""
+        fields: List[Dict[str, str]] = []
+        methods: List[Dict[str, str]] = []
+        class_signature = ""
+        current_member: Optional[Dict[str, str]] = None
+        current_collection: Optional[List[Dict[str, str]]] = None
+
+        for line in output.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped in {"{", "}"}:
+                continue
+
+            if stripped.startswith("Compiled from "):
+                continue
+
+            if stripped.endswith("{") and not class_signature:
+                class_signature = stripped[:-1].strip()
+                continue
+
+            if stripped.startswith("descriptor:") and current_member is not None:
+                current_member["descriptor"] = stripped.split(":", 1)[1].strip()
+                continue
+
+            if stripped.startswith("flags:") and current_member is not None:
+                current_member["flags"] = stripped.split(":", 1)[1].strip()
+                continue
+
+            if not stripped.endswith(";"):
+                continue
+
+            signature = stripped[:-1].strip()
+            if not signature or signature.startswith(("descriptor:", "flags:", "Code:")):
+                continue
+
+            member: Dict[str, str] = {"signature": signature}
+            if "(" in signature and ")" in signature:
+                member["name"] = self._extract_method_name(signature, class_name)
+                methods.append(member)
+                current_collection = methods
+            else:
+                member["name"] = self._extract_field_name(signature)
+                fields.append(member)
+                current_collection = fields
+
+            current_member = current_collection[-1]
+
+        return {
+            "class_signature": class_signature,
+            "fields": fields,
+            "methods": methods,
+        }
+
+    def _extract_method_name(self, signature: str, class_name: str) -> str:
+        """Extract a method or constructor name from a javap member signature."""
+        before_args = signature.split("(", 1)[0].strip()
+        method_token = before_args.split()[-1] if before_args.split() else before_args
+        simple_class_name = class_name.split(".")[-1]
+
+        if method_token == class_name or method_token.endswith("." + simple_class_name):
+            return simple_class_name
+
+        return method_token.split(".")[-1]
+
+    def _extract_field_name(self, signature: str) -> str:
+        """Extract a field name from a javap field signature."""
+        left_side = signature.split("=", 1)[0].strip()
+        return left_side.split()[-1] if left_side.split() else left_side
     
     def _run_decompiler(self, decompiler: str, class_file: Path, temp_dir: Path) -> Optional[str]:
         """Run the specified decompiler"""

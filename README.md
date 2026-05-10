@@ -128,6 +128,7 @@ The skill is located at `skills/maven-code-search` and is ready for skills.sh in
 | `get_dependencies` | Retrieve Maven dependencies from POM files |
 | `search_classes` | Search for classes across all jars |
 | `extract_source_code` | Decompile and extract Java source code |
+| `extract_jar_resource` | Extract text resources such as `.proto` files, services, and metadata |
 | `compare_versions` | Compare different versions of artifacts |
 | `find_usage_examples` | Find usage examples in test code |
 | `get_dependency_tree` | Get complete dependency tree |
@@ -157,6 +158,14 @@ The skill is located at `skills/maven-code-search` and is ready for skills.sh in
 ```
 "Show me all public methods in the Jackson ObjectMapper class"
 ```
+
+### Inspecting Compiled-Only Artifacts
+```
+"The sources jar is missing. Use extract_class_info for bytecode-backed fields and methods."
+"Find and read .proto resources from com.example:protobuf-lib:1.0.0"
+```
+
+When a dependency has no sources jar, `extract_class_info` uses `javap` internally and returns parsed fields, methods, bytecode version, and optional verbose bytecode output. Agents should use `analyze_jar`, `extract_class_info`, `extract_source_code`, and `extract_jar_resource` through this MCP instead of running `jar` or `javap` directly.
 
 ### Working with Large Responses
 ```

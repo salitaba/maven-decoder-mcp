@@ -245,6 +245,7 @@ class MavenDecoderServer:
                             "class_pattern": {"type": "string", "description": "Pattern to match class names (regex supported)"},
                             "include_methods": {"type": "boolean", "default": True, "description": "Include method signatures"},
                             "include_fields": {"type": "boolean", "default": True, "description": "Include field information"},
+                            "include_bytecode": {"type": "boolean", "default": False, "description": "Include verbose javap bytecode output for matched classes"},
                             "page": {"type": "integer", "default": 1, "description": "Page number for pagination"},
                             "items_per_page": {"type": "integer", "default": 20, "description": "Items per page"},
                             "summarize_large_content": {"type": "boolean", "default": True, "description": "Summarize large content automatically"}
@@ -301,6 +302,24 @@ class MavenDecoderServer:
                             "max_lines": {"type": "integer", "default": 500, "description": "Maximum lines to return (0 for all)"}
                         },
                         "required": ["group_id", "artifact_id", "version", "class_name"],
+                        "additionalProperties": False
+                    }
+                ),
+                Tool(
+                    name="extract_jar_resource",
+                    description="Extract text resources from a jar, such as .proto files, service descriptors, or metadata",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "group_id": {"type": "string", "description": "Maven group ID"},
+                            "artifact_id": {"type": "string", "description": "Maven artifact ID"},
+                            "version": {"type": "string", "description": "Maven version"},
+                            "resource_path": {"type": "string", "description": "Exact resource path inside the jar"},
+                            "resource_pattern": {"type": "string", "description": "Regex pattern to match resource paths"},
+                            "max_bytes": {"type": "integer", "default": 65536, "description": "Maximum bytes to read per resource"},
+                            "limit": {"type": "integer", "default": 20, "description": "Maximum matching resources to return"}
+                        },
+                        "required": ["group_id", "artifact_id", "version"],
                         "additionalProperties": False
                     }
                 ),
@@ -441,6 +460,8 @@ class MavenDecoderServer:
                     return await self._search_classes(**arguments)
                 elif name == "extract_source_code":
                     return await self._extract_source_code(**arguments)
+                elif name == "extract_jar_resource":
+                    return await self._extract_jar_resource(**arguments)
                 elif name == "compare_versions":
                     return await self._compare_versions(**arguments)
                 elif name == "find_usage_examples":
@@ -658,6 +679,7 @@ class MavenDecoderServer:
                                  class_pattern: Optional[str] = None,
                                  include_methods: bool = True,
                                  include_fields: bool = True,
+                                 include_bytecode: bool = False,
                                  page: int = 1, items_per_page: int = 20,
                                  summarize_large_content: bool = True) -> List[TextContent]:
         """Extract detailed class information"""
@@ -680,22 +702,12 @@ class MavenDecoderServer:
                         if not re.search(class_pattern, class_name):
                             continue
                     
-                    # Basic class info (without bytecode analysis)
                     class_info = {
                         "class_name": class_name,
                         "file_path": class_file,
                         "package": '.'.join(class_name.split('.')[:-1]) if '.' in class_name else '',
                         "simple_name": class_name.split('.')[-1]
                     }
-                    
-                    # TODO: Add bytecode analysis for methods and fields
-                    # This would require additional libraries like javatools or ASM
-                    if include_methods:
-                        class_info["methods"] = "Bytecode analysis not implemented yet"
-                    
-                    if include_fields:
-                        class_info["fields"] = "Bytecode analysis not implemented yet"
-                    
                     classes_info.append(class_info)
             
             result = {
@@ -704,9 +716,33 @@ class MavenDecoderServer:
                 "classes": classes_info
             }
             
-            # Apply pagination if needed
-            if self.response_manager.should_paginate(result):
+            # Apply pagination before bytecode analysis so broad queries stay bounded.
+            needs_bytecode_analysis = include_methods or include_fields or include_bytecode
+            if self.response_manager.should_paginate(result) or (
+                needs_bytecode_analysis and len(classes_info) > items_per_page
+            ):
                 result = self.response_manager.paginate_response(result, page, items_per_page)
+
+            if needs_bytecode_analysis:
+                for class_info in result["classes"]:
+                    bytecode_info = self.decompiler.analyze_class(
+                        jar_path,
+                        class_info["class_name"],
+                        include_bytecode=include_bytecode
+                    )
+
+                    if include_methods:
+                        class_info["methods"] = bytecode_info.get("methods", [])
+
+                    if include_fields:
+                        class_info["fields"] = bytecode_info.get("fields", [])
+
+                    for key in ("class_signature", "bytecode", "javap_available", "javap_error", "error"):
+                        if key in bytecode_info:
+                            class_info[key] = bytecode_info[key]
+
+                    if include_bytecode and "javap_output" in bytecode_info:
+                        class_info["javap_output"] = bytecode_info["javap_output"]
             
             # Apply summarization if needed
             if summarize_large_content and self.response_manager.should_summarize(json.dumps(result, indent=2)):
@@ -872,6 +908,60 @@ class MavenDecoderServer:
             
         except Exception as e:
             return [TextContent(type="text", text=f"Error extracting source code: {str(e)}")]
+
+    async def _extract_jar_resource(self, group_id: str, artifact_id: str, version: str,
+                                    resource_path: Optional[str] = None,
+                                    resource_pattern: Optional[str] = None,
+                                    max_bytes: int = 65536,
+                                    limit: int = 20) -> List[TextContent]:
+        """Extract text resources from a jar by exact path or regex pattern."""
+        jar_path = self._get_jar_path(group_id, artifact_id, version)
+        if not jar_path or not jar_path.exists():
+            return [TextContent(type="text", text=f"Jar file not found: {group_id}:{artifact_id}:{version}")]
+
+        if not resource_path and not resource_pattern:
+            return [TextContent(type="text", text="Either resource_path or resource_pattern is required")]
+
+        try:
+            resources = []
+            pattern = re.compile(resource_pattern) if resource_pattern else None
+
+            with zipfile.ZipFile(jar_path, 'r') as jar:
+                entries = [
+                    entry for entry in jar.namelist()
+                    if not entry.endswith('/') and not entry.endswith('.class')
+                ]
+
+                if resource_path:
+                    matches = [resource_path] if resource_path in entries else []
+                else:
+                    matches = [entry for entry in entries if pattern and pattern.search(entry)]
+
+                for entry in matches[:limit]:
+                    data = jar.read(entry)
+                    truncated = len(data) > max_bytes
+                    preview = data[:max_bytes]
+                    text = preview.decode('utf-8', errors='replace')
+
+                    resources.append({
+                        "path": entry,
+                        "size_bytes": len(data),
+                        "truncated": truncated,
+                        "content": text
+                    })
+
+            result = {
+                "artifact": f"{group_id}:{artifact_id}:{version}",
+                "jar_path": str(jar_path),
+                "total_matches": len(matches),
+                "returned": len(resources),
+                "resources": resources
+            }
+
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error extracting jar resource: {str(e)}")]
     
     def _get_sources_jar_path(self, group_id: str, artifact_id: str, version: str) -> Optional[Path]:
         """Get path to sources jar file"""
