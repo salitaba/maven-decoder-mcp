@@ -3,20 +3,15 @@ Configuration module for Maven Decoder MCP Server
 """
 
 import os
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Optional
 
 class Config:
     """Configuration settings for the Maven Decoder MCP Server"""
-    
-    # Maven repository location
+
+    # Default Maven repository location (used when nothing else overrides it).
     MAVEN_HOME: Path = Path.home() / ".m2" / "repository"
-    
-    # Override Maven home from environment variable
-    if "M2_HOME" in os.environ:
-        MAVEN_HOME = Path(os.environ["M2_HOME"]) / "repository"
-    elif "MAVEN_REPO" in os.environ:
-        MAVEN_HOME = Path(os.environ["MAVEN_REPO"])
     
     # Server configuration
     SERVER_NAME: str = "maven-decoder"
@@ -52,7 +47,84 @@ class Config:
     # File size limits (in bytes)
     MAX_JAR_SIZE: int = 100 * 1024 * 1024  # 100MB
     MAX_CLASS_SIZE: int = 1024 * 1024      # 1MB
-    
+
+    @classmethod
+    def resolve_maven_repository(cls) -> Path:
+        """Resolve the Maven local repository directory.
+
+        Precedence (first set value wins):
+        1. ``MAVEN_REPOSITORY`` or ``MAVEN_REPO`` — direct path to the
+           repository (e.g. ``F:\\data\\repository``).
+        2. ``MAVEN_HOME`` or ``M2_HOME`` — Maven install dir or the repo
+           itself. A nested ``repository`` subdir wins when it exists;
+           a ``conf/settings.xml`` with ``<localRepository>`` is honored.
+        3. ``~/.m2/settings.xml`` ``<localRepository>`` when present.
+        4. Fallback: ``~/.m2/repository``.
+        """
+        for var in ("MAVEN_REPOSITORY", "MAVEN_REPO"):
+            value = os.environ.get(var, "").strip()
+            if value:
+                return cls._expand(value)
+
+        for var in ("MAVEN_HOME", "M2_HOME"):
+            value = os.environ.get(var, "").strip()
+            if value:
+                return cls._resolve_install_dir(cls._expand(value))
+
+        settings_repo = cls._read_settings_local_repo(
+            Path.home() / ".m2" / "settings.xml"
+        )
+        if settings_repo is not None:
+            return settings_repo
+
+        return Path.home() / ".m2" / "repository"
+
+    @staticmethod
+    def _expand(value: str) -> Path:
+        """Expand ``~`` and env vars so Windows/Unix paths both work."""
+        return Path(os.path.expandvars(os.path.expanduser(value))).resolve()
+
+    @classmethod
+    def _resolve_install_dir(cls, base: Path) -> Path:
+        """Accept either a repo dir or a Maven install dir for HOME vars."""
+        candidate = base / "repository"
+        if candidate.is_dir():
+            return candidate
+        settings_repo = cls._read_settings_local_repo(base / "conf" / "settings.xml")
+        if settings_repo is not None:
+            return settings_repo
+        default_repo = Path.home() / ".m2" / "repository"
+        if base == default_repo.parent:
+            settings_default = cls._read_settings_local_repo(
+                default_repo.parent / "settings.xml"
+            )
+            if settings_default is not None:
+                return settings_default
+        return base
+
+    @staticmethod
+    def _read_settings_local_repo(settings_path: Path) -> Optional[Path]:
+        """Parse ``<localRepository>`` from a Maven settings.xml file."""
+        try:
+            if not settings_path.is_file():
+                return None
+
+            root = ET.parse(settings_path).getroot()
+            for elem in root.iter():
+                if elem.tag.rsplit("}", 1)[-1] != "localRepository":
+                    continue
+                text = (elem.text or "").strip()
+                if not text:
+                    return None
+                return Path(
+                    os.path.expandvars(os.path.expanduser(text))
+                ).resolve()
+        except OSError:
+            return None
+        except ET.ParseError:
+            return None
+        return None
+
     @classmethod
     def validate(cls) -> bool:
         """Validate configuration settings"""

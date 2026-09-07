@@ -171,11 +171,15 @@ class ResponseManager:
 class MavenDecoderServer:
     """MCP Server for Maven jar file analysis"""
     
-    def __init__(self):
+    def __init__(self, maven_repository: Optional[Union[str, Path]] = None):
         logger.info("Initializing Maven Decoder MCP Server...")
         self.server = Server("maven-decoder")
         self._ensure_server_decorators()
-        self.maven_home = Path.home() / ".m2" / "repository"
+        self.maven_home = (
+            Path(os.path.expandvars(os.path.expanduser(str(maven_repository)))).resolve()
+            if maven_repository
+            else self._resolve_maven_repository()
+        )
         self.response_manager = ResponseManager()
         logger.info(f"Maven repository location: {self.maven_home}")
         
@@ -197,6 +201,13 @@ class MavenDecoderServer:
         logger.info("Setting up MCP server handlers...")
         self.setup_handlers()
         logger.info("Maven Decoder MCP Server initialization complete!")
+
+    @staticmethod
+    def _resolve_maven_repository() -> Path:
+        """Resolve repo dir; import Config lazily to keep startup light."""
+        from .config import Config
+
+        return Config.resolve_maven_repository()
 
     def _ensure_server_decorators(self):
         """Provide decorator registration for newer MCP SDK request handlers."""

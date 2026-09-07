@@ -245,7 +245,9 @@ docker run --rm -it maven-decoder-mcp
 ## 📝 Configuration Options
 
 ### Environment Variables
-- `MAVEN_HOME`: Custom Maven repository location (default: `~/.m2/repository`)
+- `MAVEN_REPOSITORY` / `MAVEN_REPO`: direct path to local Maven repository (e.g. `F:\data\repository`). Highest precedence.
+- `MAVEN_HOME` / `M2_HOME`: Maven install dir or repository dir. A nested `repository/` subdir wins when it exists; `conf/settings.xml` `<localRepository>` honored.
+- `~/.m2/settings.xml` `<localRepository>` honored when no env var set. Fallback: `~/.m2/repository`.
 - `MCP_LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
 - `MCP_MAX_RESPONSE_SIZE`: Maximum response size in bytes (default: 50000)
 - `MCP_MAX_ITEMS_PER_PAGE`: Default items per page (default: 20)
