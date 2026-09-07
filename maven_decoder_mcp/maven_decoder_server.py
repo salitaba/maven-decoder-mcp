@@ -203,6 +203,38 @@ class MavenDecoderServer:
         if hasattr(self.server, "list_tools") and hasattr(self.server, "call_tool"):
             return
 
+        if hasattr(self.server, "add_request_handler"):
+            # MCP SDK >= 2.0: decorators were removed in favor of explicit
+            # handler registration via add_request_handler(method, params_type, handler)
+            from mcp.types import CallToolRequestParams, PaginatedRequestParams
+
+            def list_tools():
+                def decorator(func):
+                    async def handler(ctx, params):
+                        return ListToolsResult(tools=await func())
+
+                    self.server.add_request_handler("tools/list", PaginatedRequestParams, handler)
+                    return func
+
+                return decorator
+
+            def call_tool():
+                def decorator(func):
+                    async def handler(ctx, params):
+                        content = await func(params.name, params.arguments or {})
+                        if isinstance(content, CallToolResult):
+                            return content
+                        return CallToolResult(content=content)
+
+                    self.server.add_request_handler("tools/call", CallToolRequestParams, handler)
+                    return func
+
+                return decorator
+
+            self.server.list_tools = list_tools
+            self.server.call_tool = call_tool
+            return
+
         if not hasattr(self.server, "_add_request_handler"):
             raise RuntimeError("Unsupported MCP Server API: missing tool registration handlers")
 
