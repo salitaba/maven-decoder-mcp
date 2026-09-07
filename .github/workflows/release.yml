@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   test:
@@ -98,9 +99,9 @@ jobs:
         python-version: '3.11'
     
     - name: Set up Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
-        node-version: '18'
+        node-version: '20'
         registry-url: 'https://registry.npmjs.org'
     
     - name: Set up Java
@@ -210,31 +211,10 @@ jobs:
     
     - name: Publish npm package
       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       run: |
-        # Configure npm retry policy to better handle registry rate limits
-        npm config set fetch-retries 5
-        npm config set fetch-retry-factor 2
-        npm config set fetch-retry-mintimeout 20000
-        npm config set fetch-retry-maxtimeout 120000
-
-        # Exponential backoff retry for npm publish (handles occasional 429s)
-        ATTEMPTS=5
-        for i in $(seq 1 $ATTEMPTS); do
-          echo "npm publish attempt $i/$ATTEMPTS..."
-          if npm publish maven-decoder-mcp-*.tgz; then
-            echo "npm publish succeeded on attempt $i"
-            break
-          fi
-          if [ "$i" -eq "$ATTEMPTS" ]; then
-            echo "npm publish failed after $ATTEMPTS attempts"
-            exit 1
-          fi
-          SLEEP=$(( i * i * 15 ))
-          echo "Retrying in ${SLEEP}s..."
-          sleep "$SLEEP"
-        done
+        # Trusted publishing (OIDC): no NPM_TOKEN needed. Requires the
+        # npmjs.com trusted publisher entry for this repo + workflow.
+        npm publish maven-decoder-mcp-*.tgz --provenance
     
     - name: Create GitHub Release
       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
