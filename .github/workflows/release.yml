@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release'
+        description: 'Version to release (must match the tag, e.g. v1.4.0)'
         required: true
-        default: '1.0.0'
+        default: 'v1.4.0'
 
 permissions:
   contents: write
@@ -35,11 +35,18 @@ jobs:
       run: |
         VERSION="${GITHUB_REF_NAME#v}"
         echo "Release version: $VERSION"
+        # pyproject.toml is the single source of truth; the tag wins.
         sed -i -E "s/^version = \"[0-9]+\.[0-9]+\.[0-9]+\"/version = \"${VERSION}\"/" pyproject.toml
-        sed -i -E "s/\"version\": \"[0-9]+\.[0-9]+\.[0-9]+\"/\"version\": \"${VERSION}\"/" package.json
+        # package.json must match so npm and PyPI publish the same version.
+        # The pattern allows an optional '-rc.N' suffix (it is tolerated, not required).
+        sed -i -E "s/\"version\": \"[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?\"/\"version\": \"${VERSION}\"/" package.json
+        # __init__.py mirrors the version for source checkouts, where the
+        # installed distribution metadata is not available.
+        sed -i -E "s/__version__ = \"[^\"]+\"/__version__ = \"${VERSION}\"/" maven_decoder_mcp/__init__.py __init__.py
         echo "pyproject.toml version => $(grep '^version = ' pyproject.toml | head -n1)"
         echo "package.json version   => $(grep '"version"' package.json | head -n1)"
-
+        echo "package __version__    => $(grep -h '__version__' maven_decoder_mcp/__init__.py | head -n1)"
+      
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v6
       with:
@@ -91,12 +98,16 @@ jobs:
       run: |
         VERSION="${GITHUB_REF_NAME#v}"
         echo "Release version: $VERSION"
-        # Update pyproject.toml version
+        # pyproject.toml is the single source of truth; the tag wins.
         sed -i -E "s/^version = \"[0-9]+\.[0-9]+\.[0-9]+\"/version = \"${VERSION}\"/" pyproject.toml
-        # Update package.json version
-        sed -i -E "s/\"version\": \"[0-9]+\.[0-9]+\.[0-9]+\"/\"version\": \"${VERSION}\"/" package.json
+        # package.json must match so npm and PyPI publish the same version.
+        sed -i -E "s/\"version\": \"[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?\"/\"version\": \"${VERSION}\"/" package.json
+        # __init__.py mirrors the version for source checkouts, where the
+        # installed distribution metadata is not available.
+        sed -i -E "s/__version__ = \"[^\"]+\"/__version__ = \"${VERSION}\"/" maven_decoder_mcp/__init__.py __init__.py
         echo "pyproject.toml version => $(grep '^version = ' pyproject.toml | head -n1)"
         echo "package.json version   => $(grep '"version"' package.json | head -n1)"
+        echo "package __version__    => $(grep -h '__version__' maven_decoder_mcp/__init__.py | head -n1)"
 
     - name: Set up Python
       uses: actions/setup-python@v6
@@ -132,61 +143,26 @@ jobs:
       run: |
         npm pack
     
+    # Release notes must describe THIS release. The drafter commits a
+    # RELEASE_NOTES.md (via scripts/generate_release_notes.py) before tagging;
+    # CI checks it covers the tag and regenerates from git history when it is
+    # missing, so a stale body can never ship again. docker hub description is
+    # bumped in the same step (see below).
     - name: Create release notes
       run: |
-        cat > RELEASE_NOTES.md << 'EOF'
-        # Maven Decoder MCP Server ${{ github.ref_name }}
-        
-        ## Features
-        - 🔍 Comprehensive jar file analysis
-        - 🛠️ Advanced decompilation with multiple decompilers
-        - 📦 Complete Maven integration and dependency analysis
-        - 🔗 Cross-reference analysis and usage examples
-        - 🚀 Multiple installation methods (pip, npm, Docker)
-        - 📄 Intelligent pagination and summarization for large responses
-        - 🎯 Method extraction for targeted analysis
-        
-        ## Installation
-        
-        ### Quick Install
-        ```bash
-        curl -fsSL https://raw.githubusercontent.com/maven-decoder/maven-decoder-mcp/main/install.sh | bash
-        ```
-        
-        ### Python/pip
-        ```bash
-        pip install maven-decoder-mcp
-        ```
-        
-        ### Node.js/npm
-        ```bash
-        npm install -g maven-decoder-mcp
-        ```
-        
-        ### Docker
-        ```bash
-        docker run --rm -it \
-          -v ~/.m2:/home/mcpuser/.m2 \
-          maven-decoder/mcp-server:latest
-        ```
-        
-        ## New in This Release
-        
-        ### Pagination and Summarization
-        - **Smart Response Management**: Automatically handles large responses through pagination and summarization
-        - **Configurable Limits**: Environment variables for customizing response size limits
-        - **Java-Optimized Summarization**: Preserves important parts of Java source code
-        - **Method Extraction**: New tool for extracting specific methods from large classes
-        
-        ### Configuration
-        ```bash
-        # Response size limits
-        MCP_MAX_RESPONSE_SIZE=50000      # Max response size in bytes
-        MCP_MAX_ITEMS_PER_PAGE=20        # Default items per page
-        MCP_MAX_TEXT_LENGTH=10000        # Max text length before summarization
-        MCP_MAX_LINES=500                # Max lines before summarization
-        ```
-        EOF
+        if [ -f "RELEASE_NOTES.md" ] && [ -s "RELEASE_NOTES.md" ]; then
+          if grep -q "${{ github.ref_name }}" RELEASE_NOTES.md; then
+            echo "Using prepared RELEASE_NOTES.md from the repo"
+          else
+            echo "Prepared RELEASE_NOTES.md does not cover ${{ github.ref_name }}; regenerating"
+            python3 scripts/generate_release_notes.py --tag "${{ github.ref_name }}" --out RELEASE_NOTES.md
+          fi
+        else
+          echo "No prepared RELEASE_NOTES.md; generating from git history"
+          python3 scripts/generate_release_notes.py --tag "${{ github.ref_name }}" --out RELEASE_NOTES.md
+        fi
+        echo "--- RELEASE_NOTES.md ---"
+        cat RELEASE_NOTES.md
     
     - name: Upload Python package to PyPI
       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
@@ -194,25 +170,11 @@ jobs:
         TWINE_USERNAME: __token__
         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
       run: |
-        echo "Checking environment variables..."
-        echo "TWINE_USERNAME is set: ${{ env.TWINE_USERNAME != '' }}"
-        echo "PYPI_API_TOKEN is set: ${{ secrets.PYPI_API_TOKEN != '' }}"
-        echo "Token starts with pypi-: ${{ startsWith(secrets.PYPI_API_TOKEN, 'pypi-') }}"
-        
-        # Alternative: Create .pypirc file
-        echo "Creating .pypirc file..."
-        cat > ~/.pypirc << EOF
-        [distutils]
-        index-servers = pypi
-        
-        [pypi]
-        repository = https://upload.pypi.org/legacy/
-        username = __token__
-        password = ${{ secrets.PYPI_API_TOKEN }}
-        EOF
-        
-        echo "Uploading with twine..."
-        twine upload --skip-existing --config-file ~/.pypirc dist/*
+        if [ -z "$TWINE_PASSWORD" ]; then
+          echo "::error::PYPI_API_TOKEN secret is not set; aborting publish"
+          exit 1
+        fi
+        twine upload --skip-existing dist/*
     
     - name: Publish npm package
       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
@@ -244,7 +206,15 @@ jobs:
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-    
+
+    - name: Check Docker Hub credentials
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      run: |
+        if [ -z "${{ secrets.DOCKER_USERNAME }}" ] || [ -z "${{ secrets.DOCKER_PASSWORD }}" ]; then
+          echo "::error::DOCKER_USERNAME / DOCKER_PASSWORD secrets are not set; aborting docker publish"
+          exit 1
+        fi
+
     - name: Login to Docker Hub
       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
       uses: docker/login-action@v3
@@ -278,4 +248,6 @@ jobs:
         push: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+        sbom: true
+        provenance: true
         platforms: linux/amd64,linux/arm64

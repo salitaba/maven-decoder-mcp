@@ -1,207 +1,80 @@
 # 🚀 How to Release Maven Decoder MCP Server
 
-This guide walks you through releasing your MCP server so developers can easily install it.
+**The short version is in [RELEASING.md](RELEASING.md) — follow that checklist.
+This page explains the moving parts underneath it.**
 
-## 📋 Quick Overview
+Releases are fully automated: push a tag like `v1.3.0` and GitHub Actions
+builds and publishes to PyPI, npm, Docker Hub, and GitHub Releases.
 
-We've prepared **4 ways** for people to install your server:
-1. **pip install maven-decoder-mcp** (Python users)
-2. **npm install -g maven-decoder-mcp** (Node.js users)  
-3. **docker run maven-decoder/mcp-server** (Docker users)
-4. **One-line install script** (everyone else)
+## How the tag becomes the release
 
-## 🎯 Option A: Manual Release (Easiest to Start)
+The tag is the single source of truth. Both the `test` and `build` jobs in
+`.github/workflows/release.yml` rewrite the version files from
+`${GITHUB_REF_NAME#v}`:
 
-### Step 1: Create GitHub Repository
-```bash
-# In your project directory
-git init
-git add .
-git commit -m "Initial release v1.0.0"
+- `pyproject.toml` (`version = "..."`) — what PyPI publishes
+- `package.json` (`"version": "..."`) — what npm publishes
+- `maven_decoder_mcp/__init__.py` and root `__init__.py` (`__version__`) —
+  fallback for source checkouts without installed metadata
 
-# Create repository on GitHub, then:
-git remote add origin https://github.com/salitaba/maven-decoder-mcp.git
-git push -u origin main
-```
+So the repo copies only need to be sane, not exact. What the server reports
+to MCP clients (`server_version`) is resolved at runtime from the installed
+distribution metadata.
 
-### Step 2: Publish to PyPI (Python Package)
-```bash
-# Install publishing tools
-pip install twine
+## What the workflow does
 
-# Upload to PyPI (you'll need a PyPI account)
-twine upload dist/*
-```
-**Result**: People can now run `pip install maven-decoder-mcp`
+1. **`test`** — full pytest suite on Python 3.10 / 3.11 / 3.12 with
+   `MAVEN_OFFLINE=true`, plus `test_startup.py` and `run_tests.py`.
+2. **`build`** — rebuilds with the tag version, uploads to PyPI with twine,
+   publishes to npm via OIDC trusted publishing (no token secret), and
+   creates the GitHub release with `RELEASE_NOTES.md` as the body plus the
+   auto-generated changelog.
+3. **`docker`** — builds `linux/amd64,linux/arm64` and pushes
+   `ali79taba/maven-decoder-mcp` with the `X.Y.Z`, `X.Y`, `X`, and `latest`
+   tags, plus SBOM and provenance attestations.
 
-### Step 3: Publish to npm (Node.js Package) 
-```bash
-# Build npm package
-npm pack
+## Release notes
 
-# Publish (you'll need an npm account)
-npm publish maven-decoder-mcp-1.0.0.tgz
-```
-**Result**: People can now run `npm install -g maven-decoder-mcp`
-
-### Step 4: Create GitHub Release
-1. Go to your GitHub repository
-2. Click "Releases" → "Create a new release"
-3. Tag: `v1.0.0`
-4. Upload files from `dist/` folder
-5. Publish release
-
-**Result**: People can download and install manually
-
-## 🤖 Option B: Automated Release (Professional)
-
-### Step 1: Setup Repository (same as above)
-```bash
-git init
-git add .
-git commit -m "Initial release v1.0.0"
-git remote add origin https://github.com/salitaba/maven-decoder-mcp.git
-git push -u origin main
-```
-
-### Step 2: Add Secrets to GitHub
-1. Go to your repository → Settings → Secrets and variables → Actions
-2. Add these secrets:
-   - `PYPI_API_TOKEN`: Get from pypi.org → Account settings → API tokens
-   - `NPM_TOKEN`: Get from npmjs.com → Access Tokens
-   - `DOCKER_USERNAME`: Your Docker Hub username
-   - `DOCKER_PASSWORD`: Your Docker Hub password
-
-### Step 3: Create Release Tag
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-**Result**: GitHub Actions automatically:
-- ✅ Builds all packages
-- ✅ Publishes to PyPI, npm, Docker Hub
-- ✅ Creates GitHub release
-
-## 📦 What Users Will Be Able to Do
-
-After release, developers can install your server with:
-
-### Python Users
-```bash
-pip install maven-decoder-mcp
-maven-decoder-mcp
-```
-
-### Node.js Users
-```bash
-npm install -g maven-decoder-mcp
-maven-decoder-mcp
-```
-
-### Docker Users
-```bash
-docker run --rm -it \
-  -v ~/.m2:/home/mcpuser/.m2 \
-  maven-decoder/mcp-server:latest
-```
-
-### Everyone Else
-```bash
-curl -fsSL https://raw.githubusercontent.com/salitaba/maven-decoder-mcp/main/install.sh | bash
-```
-
-## 🔍 Step-by-Step: First Time Release
-
-### 1. Create Accounts (if you don't have them)
-- **GitHub**: github.com (for code hosting)
-- **PyPI**: pypi.org (for Python packages)
-- **npm**: npmjs.com (for Node.js packages)
-- **Docker Hub**: hub.docker.com (for Docker images)
-
-### 2. Test Everything Works
-```bash
-# Test the built package locally
-pip install dist/maven_decoder_mcp-1.0.0-py3-none-any.whl
-maven-decoder-mcp --help
-```
-
-### 3. Upload to PyPI
-```bash
-# Create PyPI account at pypi.org
-# Get API token from Account Settings → API tokens
-
-# Install upload tool
-pip install twine
-
-# Upload (will ask for username and password/token)
-twine upload dist/*
-```
-
-### 4. Upload to npm
-```bash
-# Create npm account at npmjs.com
-# Login to npm
-npm login
-
-# Publish package
-npm publish maven-decoder-mcp-1.0.0.tgz
-```
-
-### 5. Create GitHub Release
-1. Push your code to GitHub
-2. Go to repository → Releases → "Create a new release"
-3. Tag version: `v1.0.0`
-4. Release title: `Maven Decoder MCP Server v1.0.0`
-5. Upload files from `dist/` folder
-6. Click "Publish release"
-
-## ✅ Verification
-
-After release, verify everything works:
+Notes are **drafted before tagging**, committed, and used as-is:
 
 ```bash
-# Test Python install
-pip install maven-decoder-mcp
-maven-decoder-mcp
-
-# Test npm install  
-npm install -g maven-decoder-mcp
-maven-decoder-mcp
-
-# Check GitHub release page has files
+python3 scripts/generate_release_notes.py --tag vX.Y.Z
+$EDITOR RELEASE_NOTES.md   # always review before committing
 ```
 
-## 🆘 If You Get Stuck
+The generator derives sections from conventional-commit subjects since the
+previous tag (`feat:` → Features, `fix:`/`perf:` → Fixes, everything else →
+Maintenance) and injects the install snippet with the right version.
 
-### Common Issues:
+If the file is missing at build time, CI regenerates it from git history
+rather than shipping a static template — a fixed template is how every
+release ended up advertising "pagination and summarization" regardless of
+what actually changed.
 
-**"Package already exists on PyPI"**
-- Update version in `pyproject.toml` (e.g., `1.0.1`)
-- Rebuild: `python setup.py sdist bdist_wheel`
-- Upload again
+## Secrets
 
-**"npm publish fails"**
-- Update version in `package.json`
-- Run `npm pack` again
-- Publish the new `.tgz` file
+Settings → Secrets and variables → Actions:
 
-**"Don't want to deal with accounts"**
-- Just push to GitHub
-- People can install from source:
-  ```bash
-  pip install git+https://github.com/salitaba/maven-decoder-mcp.git
-  ```
+- `PYPI_API_TOKEN` — PyPI account token (`pypi-…`). Missing token fails the
+  build job with an explicit error, it no longer leaks secret *presence*
+  checks into logs.
+- `DOCKER_USERNAME` / `DOCKER_PASSWORD` — Docker Hub. Same explicit failure
+  when unset.
+- npm needs **no secret**: trusted publishing via OIDC. The trusted
+  publisher entry on npmjs.com must point at this repo + workflow.
+- GitHub release upload uses the built-in `GITHUB_TOKEN`.
 
-## 🎉 Success!
+## If it fails
 
-Once released, your users can install with just:
-```bash
-pip install maven-decoder-mcp
-```
+- **Before any publish**: fix, delete the tag (`git tag -d vX.Y.Z &&
+  git push origin :vX.Y.Z`), start over.
+- **After a partial publish**: never reuse the version. Bump patch and
+  release again — npm refuses republished versions outright.
 
-And start using it immediately in their IDEs like Cursor!
+## Legacy helpers (do not use for real releases)
 
----
+- `scripts/release.py` — hardcodes v1.0.0, calls `python setup.py` (no
+  `setup.py` exists), pushes the wrong Docker image name. Reference only.
+- `simple_release.sh` — interactive walkthrough from the first release,
+  including an unimplemented "full release" option. Reference only.
 
-**Need help?** The packages are already built and ready to upload. You just need to create the accounts and run the upload commands above.

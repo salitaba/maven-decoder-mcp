@@ -7,14 +7,14 @@ This document outlines how the Maven Decoder MCP Server is packaged and distribu
 ### 1. Python Package (PyPI) - **Recommended**
 **Installation**: `pip install maven-decoder-mcp`
 
-- **Files**: `dist/maven_decoder_mcp-1.0.0-py3-none-any.whl`, `dist/maven-decoder-mcp-1.0.0.tar.gz`
+- **Files**: `dist/maven_decoder_mcp-<version>-py3-none-any.whl`, `dist/maven-decoder-mcp-<version>.tar.gz`
 - **Benefits**: Standard Python packaging, automatic dependency management
 - **Target Users**: Python developers, data scientists, most users
 
 ### 2. Node.js Package (npm)
 **Installation**: `npm install -g maven-decoder-mcp`
 
-- **Files**: `maven-decoder-mcp-1.0.0.tgz`
+- **Files**: `maven-decoder-mcp-<version>.tgz`
 - **Benefits**: Easy for Node.js developers, automatic Python setup
 - **Target Users**: JavaScript/TypeScript developers, full-stack developers
 

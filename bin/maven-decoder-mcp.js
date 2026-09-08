@@ -15,7 +15,8 @@ const os = require('os');
 // Configuration
 const PYTHON_COMMANDS = ['python3', 'python'];
 const PACKAGE_NAME = 'maven-decoder-mcp';
-const MCP_SDK_URL = 'git+https://github.com/modelcontextprotocol/python-sdk.git';
+// The PyPI package declares the MCP SDK as a dependency, so a plain
+// `pip install maven-decoder-mcp` pulls it from PyPI; no git URL needed.
 
 /**
  * Check if a command exists
@@ -60,7 +61,7 @@ async function installPackage(pythonCmd) {
     console.log('📦 Installing Maven Decoder MCP...');
     
     return new Promise((resolve, reject) => {
-        const install = spawn(pythonCmd, ['-m', 'pip', 'install', PACKAGE_NAME, MCP_SDK_URL], {
+        const install = spawn(pythonCmd, ['-m', 'pip', 'install', PACKAGE_NAME], {
             stdio: 'inherit'
         });
         

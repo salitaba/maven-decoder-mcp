@@ -46,7 +46,7 @@ echo ""
 # Check if packages exist
 if [ ! -d "dist" ] || [ -z "$(ls -A dist)" ]; then
     print_error "No packages found in dist/ directory"
-    echo "Run this first: python setup.py sdist bdist_wheel"
+    echo "Run this first: python -m build"
     exit 1
 fi
 
@@ -99,7 +99,7 @@ case $choice in
         fi
         
         # Build npm package if not exists
-        if [ ! -f "maven-decoder-mcp-1.0.0.tgz" ]; then
+        if ! ls maven-decoder-mcp-*.tgz >/dev/null 2>&1; then
             print_step "Building npm package..."
             npm pack
         fi
@@ -184,8 +184,8 @@ case $choice in
         print_success "Built packages:"
         ls -la dist/
         
-        if [ -f "maven-decoder-mcp-1.0.0.tgz" ]; then
-            print_success "npm package: maven-decoder-mcp-1.0.0.tgz"
+        if ls maven-decoder-mcp-*.tgz >/dev/null 2>&1; then
+            print_success "npm package: $(ls maven-decoder-mcp-*.tgz | head -n1)"
         else
             print_warning "npm package not built. Run: npm pack"
         fi

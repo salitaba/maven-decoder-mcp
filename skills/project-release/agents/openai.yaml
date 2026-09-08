@@ -1,0 +1,19 @@
+interface:
+  display_name: "Project Release"
+  short_description: "Cut a verified release of maven-decoder-mcp"
+  default_prompt: "Use $project-release to ship a new version of this project: draft notes, verify the gate, tag, watch CI, and confirm PyPI, npm, Docker Hub, and GitHub."
+
+dependencies:
+  tools:
+    - type: "shell"
+      value: "git"
+      description: "Inspect commits, tag versions, and push to origin"
+    - type: "shell"
+      value: "gh"
+      description: "Watch release workflows and verify GitHub releases"
+    - type: "shell"
+      value: "pytest"
+      description: "Run the offline test gate before tagging"
+
+policy:
+  allow_implicit_invocation: false

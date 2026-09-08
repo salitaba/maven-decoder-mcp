@@ -151,14 +151,8 @@ install_pip() {
         fi
     fi
     
-    # Install MCP SDK
-    print_status "Installing MCP SDK..."
-    if [ "$GLOBAL_INSTALL" = "--global" ]; then
-        $python_cmd -m pip install "git+https://github.com/modelcontextprotocol/python-sdk.git"
-    else
-        $python_cmd -m pip install --user "git+https://github.com/modelcontextprotocol/python-sdk.git"
-    fi
-    
+    # The PyPI package declares the MCP SDK as a dependency, so a plain
+    # install already pulls it from PyPI (no git dependency needed).
     print_success "Pip installation complete!"
     print_status "You can now run: maven-decoder-mcp"
 }
@@ -234,15 +228,15 @@ install_docker() {
     fi
     
     print_status "Pulling Docker image..."
-    docker pull maven-decoder/mcp-server:latest
-    
+    docker pull ali79taba/maven-decoder-mcp:latest
+
     print_status "Creating wrapper script..."
     cat > ~/.local/bin/maven-decoder-mcp << 'EOF'
 #!/bin/bash
 docker run --rm -it \
     -v ~/.m2:/home/mcpuser/.m2 \
     -v $(pwd):/workspace \
-    maven-decoder/mcp-server:latest "$@"
+    ali79taba/maven-decoder-mcp:latest "$@"
 EOF
     chmod +x ~/.local/bin/maven-decoder-mcp
     

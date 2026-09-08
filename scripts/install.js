@@ -39,10 +39,10 @@ async function setup() {
     console.log('📦 Pre-installing Maven Decoder MCP for faster startup...');
     
     try {
+        // The PyPI package declares the MCP SDK as a dependency already.
         const install = spawn(pythonCmd, [
-            '-m', 'pip', 'install', 
-            'maven-decoder-mcp',
-            'git+https://github.com/modelcontextprotocol/python-sdk.git'
+            '-m', 'pip', 'install',
+            'maven-decoder-mcp'
         ], {
             stdio: 'inherit'
         });
