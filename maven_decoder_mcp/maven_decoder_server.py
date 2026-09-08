@@ -57,6 +57,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def get_version() -> str:
+    """Resolve the running package version.
+
+    Read from the installed distribution metadata so the version reported to
+    MCP clients cannot drift from what was actually packaged; the release
+    workflow rewrites ``pyproject.toml`` from the git tag at build time.
+    """
+    try:
+        from importlib.metadata import version
+
+        return version("maven-decoder-mcp")
+    except Exception:
+        # Running from a source checkout without an installed distribution.
+        try:
+            from . import __version__
+
+            return __version__
+        except Exception:
+            return "0.0.0"
+
+
 class ResponseManager:
     """Manages large responses with pagination and summarization"""
     
@@ -1660,7 +1682,7 @@ class MavenDecoderServer:
                     write_stream,
                     InitializationOptions(
                         server_name="maven-decoder",
-                        server_version="1.0.0",
+                        server_version=get_version(),
                         capabilities=ServerCapabilities(
                             tools=ToolsCapability(listChanged=False)
                         )

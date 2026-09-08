@@ -9,6 +9,7 @@ the network.
 import hashlib
 import json
 import os
+import re
 import zipfile
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -497,6 +498,51 @@ class TestAnalyzerRemotePoms:
 
         assert analyzer._get_pom_path("com.example", "demo", "") is None
         resolver.assert_not_called()
+
+
+class TestVersionReporting:
+    """The version reported to MCP clients must track the packaged version."""
+
+    def test_get_version_matches_package_metadata(self):
+        from importlib.metadata import version
+
+        from maven_decoder_mcp.maven_decoder_server import get_version
+
+        assert get_version() == version("maven-decoder-mcp")
+
+    def test_get_version_is_not_hardcoded_placeholder(self):
+        from maven_decoder_mcp.maven_decoder_server import get_version
+
+        assert get_version() != "0.0.0"
+
+    def test_package_json_matches_pyproject(self):
+        """Both packaging manifests must declare the same version.
+
+        The release workflow rewrites them from the git tag, but they should
+        agree in the repository too so local builds are not misleading.
+        """
+        root = Path(__file__).resolve().parent.parent
+
+        package_json = json.loads((root / "package.json").read_text())["version"]
+
+        pyproject = (root / "pyproject.toml").read_text()
+        pyproject_version = re.search(
+            r'^version = "([^"]+)"', pyproject, re.MULTILINE
+        ).group(1)
+
+        assert package_json == pyproject_version
+
+    def test_dunder_version_matches_pyproject(self):
+        import maven_decoder_mcp
+
+        root = Path(__file__).resolve().parent.parent
+        pyproject_version = re.search(
+            r'^version = "([^"]+)"',
+            (root / "pyproject.toml").read_text(),
+            re.MULTILINE,
+        ).group(1)
+
+        assert maven_decoder_mcp.__version__ == pyproject_version
 
 
 class TestServerRemoteIntegration:

@@ -15,7 +15,6 @@ class Config:
     
     # Server configuration
     SERVER_NAME: str = "maven-decoder"
-    SERVER_VERSION: str = "1.0.0"
 
     # Remote (online) Maven support.
     # Only the canonical index is used by default: the central.sonatype.com

@@ -1,14 +1,13 @@
 {
   "name": "maven-decoder-mcp",
-  "version": "1.0.13",
-  "description": "MCP server for reading and decompiling Maven .m2 jar files with comprehensive Java project analysis",
+  "version": "1.1.0",
+  "description": "MCP server for reading and decompiling Maven jar files, with online Maven Central search and comprehensive Java project analysis",
   "main": "index.js",
   "bin": {
     "maven-decoder-mcp": "./bin/maven-decoder-mcp.js"
   },
   "scripts": {
     "install": "node scripts/install.js",
-    "test": "node scripts/test.js",
     "start": "node bin/maven-decoder-mcp.js"
   },
   "keywords": [
@@ -20,7 +19,9 @@
     "analysis",
     "cursor",
     "ide",
-    "model-context-protocol"
+    "model-context-protocol",
+    "maven-central",
+    "search"
   ],
   "author": "Your Name",
   "license": "MIT",
@@ -33,13 +34,9 @@
     "url": "https://github.com/salitaba/maven-decoder-mcp/issues"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   },
-  "dependencies": {
-    "child_process": "^1.0.2",
-    "fs-extra": "^11.0.0",
-    "path": "^0.12.7"
-  },
+  "dependencies": {},
   "devDependencies": {},
   "files": [
     "bin/",
