@@ -140,7 +140,7 @@ The skill is located at `skills/maven-code-search` and is ready for skills.sh in
 | `search_classes` | Search for classes across all jars, optionally filtered by annotation |
 | `extract_source_code` | Decompile and extract Java source code |
 | `extract_jar_resource` | Extract text resources such as `.proto` files, services, and metadata |
-| `compare_versions` | Compare different versions of artifacts |
+| `compare_versions` | Compare two versions, including a public API diff and breaking changes |
 | `find_usage_examples` | Find classes that reference a given class or method |
 | `get_dependency_tree` | Get complete dependency tree |
 | `find_dependents` | Find artifacts that depend on a specific artifact |
@@ -172,6 +172,16 @@ The skill is located at `skills/maven-code-search` and is ready for skills.sh in
 ```
 "Find all version conflicts in my Maven repository"
 ```
+
+### Checking an Upgrade for Breaking Changes
+```
+"Compare org.jsoup:jsoup 1.17.2 with 1.23.2 and tell me what would break"
+```
+`compare_versions` diffs the public and protected members of every class the
+two versions share, and reports removals separately from additions. Removed
+members and removed classes are counted as breaking changes. Members are
+compared as *declared*, so one that moved to a supertype is reported as
+removed even though it may still be callable.
 
 ### Exploring APIs
 ```
@@ -339,6 +349,7 @@ docker run --rm -it maven-decoder-mcp
 - `MCP_MAX_TEXT_LENGTH`: Maximum text length before summarization (default: 10000)
 - `MCP_MAX_LINES`: Maximum lines before summarization (default: 500)
 - `MCP_USAGE_SCAN_LIMIT`: Max classes scanned by `find_usage_examples` (default: 200000)
+- `MCP_API_DIFF_LIMIT`: Max classes compared by `compare_versions` (default: 2000)
 - `MAVEN_DECODER_DECOMPILER_DIR`: Directory holding `cfr.jar` / `procyon-decompiler.jar`
 
 ### Advanced Configuration

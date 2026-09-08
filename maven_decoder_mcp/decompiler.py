@@ -9,7 +9,7 @@ import tempfile
 import os
 import zipfile
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
@@ -205,7 +205,58 @@ class JavaDecompiler:
         return analysis
 
     @staticmethod
-    def read_class_strings(class_data: bytes) -> Dict[str, Any]:
+    def _parse_constant_pool(class_data: bytes) -> Optional[Tuple[Dict[int, str], int]]:
+        """Walk the constant pool, returning ``(utf8_by_index, next_offset)``.
+
+        Indices are preserved because field and method entries reference
+        their name and descriptor by pool index. Returns ``None`` when the
+        data is not a parseable class file.
+        """
+        # magic(4) + minor(2) + major(2) + constant_pool_count(2)
+        if len(class_data) < 10 or class_data[:4] != b'\xca\xfe\xba\xbe':
+            return None
+
+        try:
+            count = int.from_bytes(class_data[8:10], 'big')
+            offset = 10
+            utf8: Dict[int, str] = {}
+
+            index = 1
+            while index < count:
+                if offset >= len(class_data):
+                    return None
+
+                tag = class_data[offset]
+                offset += 1
+
+                if tag == 1:  # CONSTANT_Utf8
+                    length = int.from_bytes(class_data[offset:offset + 2], 'big')
+                    offset += 2
+                    raw = class_data[offset:offset + length]
+                    offset += length
+                    utf8[index] = raw.decode('utf-8', errors='replace')
+                elif tag in (7, 8, 16, 19, 20):      # 2-byte payload
+                    offset += 2
+                elif tag in (15,):                   # MethodHandle: 1 + 2
+                    offset += 3
+                elif tag in (3, 4, 9, 10, 11, 12, 17, 18):  # 4-byte payload
+                    offset += 4
+                elif tag in (5, 6):                  # Long/Double take two slots
+                    offset += 8
+                    index += 1
+                else:
+                    # Unknown tag: the pool can no longer be walked safely.
+                    return None
+
+                index += 1
+
+            return utf8, offset
+
+        except Exception:
+            return None
+
+    @classmethod
+    def read_class_strings(cls, class_data: bytes) -> Dict[str, Any]:
         """Extract UTF-8 constant-pool entries from a .class file.
 
         The constant pool holds every type name, annotation descriptor and
@@ -219,57 +270,135 @@ class JavaDecompiler:
         """
         result: Dict[str, Any] = {"strings": [], "annotations": [], "parsed": False}
 
-        # magic(4) + minor(2) + major(2) + constant_pool_count(2)
-        if len(class_data) < 10 or class_data[:4] != b'\xca\xfe\xba\xbe':
+        parsed = cls._parse_constant_pool(class_data)
+        if parsed is None:
             return result
+
+        strings = list(parsed[0].values())
+
+        result["strings"] = strings
+        result["annotations"] = sorted({
+            text[1:-1].replace('/', '.')
+            for text in strings
+            if len(text) > 2 and text.startswith('L') and text.endswith(';')
+        })
+        result["parsed"] = True
+        return result
+
+    # JVM access flags relevant to API surface (JVMS 4.1, 4.5, 4.6)
+    ACC_PUBLIC = 0x0001
+    ACC_PRIVATE = 0x0002
+    ACC_PROTECTED = 0x0004
+    ACC_STATIC = 0x0008
+    ACC_FINAL = 0x0010
+    ACC_INTERFACE = 0x0200
+    ACC_ABSTRACT = 0x0400
+    ACC_SYNTHETIC = 0x1000
+
+    @classmethod
+    def read_class_api(cls, class_data: bytes) -> Optional[Dict[str, Any]]:
+        """Extract the public API surface of a class file.
+
+        Returns the class's own access flags plus its public and protected
+        fields and methods, which together define what callers can depend
+        on. Private and package-private members are excluded because they
+        are not part of the compatibility contract, and synthetic members
+        (bridge methods, lambda plumbing) are skipped because the compiler
+        may change them without any source-level API change.
+
+        Returns ``None`` when the class cannot be parsed.
+        """
+        parsed = cls._parse_constant_pool(class_data)
+        if parsed is None:
+            return None
+
+        utf8, offset = parsed
 
         try:
-            count = int.from_bytes(class_data[8:10], 'big')
-            offset = 10
-            strings: List[str] = []
+            def u2(pos: int) -> int:
+                return int.from_bytes(class_data[pos:pos + 2], 'big')
 
-            index = 1
-            while index < count:
-                if offset >= len(class_data):
-                    return result
+            # access_flags(2) this_class(2) super_class(2) interfaces_count(2)
+            if offset + 8 > len(class_data):
+                return None
 
-                tag = class_data[offset]
-                offset += 1
+            access_flags = u2(offset)
+            offset += 6                      # skip this_class, super_class
+            interfaces_count = u2(offset)
+            offset += 2 + interfaces_count * 2
 
-                if tag == 1:  # CONSTANT_Utf8
-                    length = int.from_bytes(class_data[offset:offset + 2], 'big')
-                    offset += 2
-                    raw = class_data[offset:offset + length]
-                    offset += length
-                    strings.append(raw.decode('utf-8', errors='replace'))
-                elif tag in (7, 8, 16, 19, 20):      # 2-byte payload
-                    offset += 2
-                elif tag in (15,):                   # MethodHandle: 1 + 2
-                    offset += 3
-                elif tag in (3, 4, 9, 10, 11, 12, 17, 18):  # 4-byte payload
-                    offset += 4
-                elif tag in (5, 6):                  # Long/Double take two slots
-                    offset += 8
-                    index += 1
-                else:
-                    # Unknown tag: the pool can no longer be walked safely.
-                    return result
+            def skip_attributes(pos: int) -> Optional[int]:
+                if pos + 2 > len(class_data):
+                    return None
+                count = u2(pos)
+                pos += 2
+                for _ in range(count):
+                    if pos + 6 > len(class_data):
+                        return None
+                    length = int.from_bytes(class_data[pos + 2:pos + 6], 'big')
+                    pos += 6 + length
+                return pos
 
-                index += 1
+            def read_members(pos: int) -> Optional[Tuple[List[Dict[str, Any]], int]]:
+                if pos + 2 > len(class_data):
+                    return None
+                count = u2(pos)
+                pos += 2
 
-            annotations = sorted({
-                text[1:-1].replace('/', '.')
-                for text in strings
-                if len(text) > 2 and text.startswith('L') and text.endswith(';')
-            })
+                members: List[Dict[str, Any]] = []
+                for _ in range(count):
+                    if pos + 6 > len(class_data):
+                        return None
+                    flags = u2(pos)
+                    name = utf8.get(u2(pos + 2), "")
+                    descriptor = utf8.get(u2(pos + 4), "")
+                    pos += 6
 
-            result["strings"] = strings
-            result["annotations"] = annotations
-            result["parsed"] = True
-            return result
+                    nxt = skip_attributes(pos)
+                    if nxt is None:
+                        return None
+                    pos = nxt
+
+                    # Only visible, non-synthetic members form the contract.
+                    if flags & cls.ACC_SYNTHETIC:
+                        continue
+                    if not (flags & (cls.ACC_PUBLIC | cls.ACC_PROTECTED)):
+                        continue
+
+                    members.append({
+                        "name": name,
+                        "descriptor": descriptor,
+                        "access_flags": flags,
+                        "static": bool(flags & cls.ACC_STATIC),
+                        "final": bool(flags & cls.ACC_FINAL),
+                        "abstract": bool(flags & cls.ACC_ABSTRACT),
+                        "visibility": "public" if flags & cls.ACC_PUBLIC else "protected",
+                    })
+
+                return members, pos
+
+            fields_result = read_members(offset)
+            if fields_result is None:
+                return None
+            fields, offset = fields_result
+
+            methods_result = read_members(offset)
+            if methods_result is None:
+                return None
+            methods, _ = methods_result
+
+            return {
+                "access_flags": access_flags,
+                "public": bool(access_flags & cls.ACC_PUBLIC),
+                "interface": bool(access_flags & cls.ACC_INTERFACE),
+                "abstract": bool(access_flags & cls.ACC_ABSTRACT),
+                "final": bool(access_flags & cls.ACC_FINAL),
+                "fields": fields,
+                "methods": methods,
+            }
 
         except Exception:
-            return result
+            return None
 
     def _run_javap_on_classpath(self, jar_path: Path, class_name: str,
                                 include_bytecode: bool = False) -> Optional[str]:

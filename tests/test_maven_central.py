@@ -529,6 +529,262 @@ def make_class_bytes(strings, extra_tags=True):
     )
 
 
+ACC_PUBLIC = 0x0001
+ACC_PRIVATE = 0x0002
+ACC_PROTECTED = 0x0004
+ACC_STATIC = 0x0008
+ACC_FINAL = 0x0010
+ACC_SYNTHETIC = 0x1000
+
+
+def make_api_class(fields=(), methods=(), class_flags=ACC_PUBLIC):
+    """Build a .class file with real field and method tables.
+
+    Each member is ``(name, descriptor, access_flags)``. Only the structure
+    read_class_api depends on is emitted, which is enough to exercise the
+    parser without pulling in a Java compiler.
+    """
+    import struct
+
+    pool_index = 1
+    indices = {}
+
+    entries = b""
+    for name, descriptor, _ in list(fields) + list(methods):
+        for text in (name, descriptor):
+            if text not in indices:
+                raw = text.encode("utf-8")
+                entries += bytes([1]) + struct.pack(">H", len(raw)) + raw
+                indices[text] = pool_index
+                pool_index += 1
+
+    def member_table(members):
+        table = struct.pack(">H", len(members))
+        for name, descriptor, flags in members:
+            table += struct.pack(
+                ">HHHH",
+                flags,
+                indices[name],
+                indices[descriptor],
+                0,  # attributes_count
+            )
+        return table
+
+    return (
+        b"\xca\xfe\xba\xbe"
+        + struct.pack(">H", 0)             # minor
+        + struct.pack(">H", 61)            # major
+        + struct.pack(">H", pool_index)    # constant_pool_count
+        + entries
+        + struct.pack(">H", class_flags)   # access_flags
+        + struct.pack(">H", 0)             # this_class
+        + struct.pack(">H", 0)             # super_class
+        + struct.pack(">H", 0)             # interfaces_count
+        + member_table(list(fields))
+        + member_table(list(methods))
+        + struct.pack(">H", 0)             # class attributes_count
+    )
+
+
+class TestClassApiExtraction:
+    """read_class_api underpins the public API diff."""
+
+    def test_extracts_public_methods(self):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        data = make_api_class(methods=[("doWork", "()V", ACC_PUBLIC)])
+        api = JavaDecompiler.read_class_api(data)
+
+        assert api is not None
+        assert api["public"] is True
+        assert api["methods"][0]["name"] == "doWork"
+        assert api["methods"][0]["descriptor"] == "()V"
+
+    def test_excludes_private_members(self):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        data = make_api_class(
+            methods=[
+                ("visible", "()V", ACC_PUBLIC),
+                ("hidden", "()V", ACC_PRIVATE),
+            ]
+        )
+        api = JavaDecompiler.read_class_api(data)
+
+        assert [m["name"] for m in api["methods"]] == ["visible"]
+
+    def test_includes_protected_members(self):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        data = make_api_class(methods=[("hook", "()V", ACC_PROTECTED)])
+        api = JavaDecompiler.read_class_api(data)
+
+        assert api["methods"][0]["visibility"] == "protected"
+
+    def test_excludes_synthetic_members(self):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        data = make_api_class(
+            methods=[
+                ("real", "()V", ACC_PUBLIC),
+                ("bridge$", "()V", ACC_PUBLIC | ACC_SYNTHETIC),
+            ]
+        )
+        api = JavaDecompiler.read_class_api(data)
+
+        assert [m["name"] for m in api["methods"]] == ["real"]
+
+    def test_reports_static_and_final(self):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        data = make_api_class(
+            fields=[("CONSTANT", "I", ACC_PUBLIC | ACC_STATIC | ACC_FINAL)]
+        )
+        api = JavaDecompiler.read_class_api(data)
+
+        field = api["fields"][0]
+        assert field["static"] is True
+        assert field["final"] is True
+
+    def test_returns_none_for_invalid_data(self):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        assert JavaDecompiler.read_class_api(b"nonsense") is None
+
+
+class TestApiComparison:
+    """compare_versions(compare_api=True) must produce a real diff."""
+
+    def setup_method(self):
+        self.server = MavenDecoderServer()
+
+    def _jar(self, tmp_path, name, entries):
+        path = tmp_path / name
+        with zipfile.ZipFile(path, "w") as jar:
+            for entry, data in entries.items():
+                jar.writestr(entry, data)
+        return path
+
+    def _diff(self, tmp_path, old_methods, new_methods, **kwargs):
+        old = self._jar(tmp_path, "old.jar", {
+            "com/example/Api.class": make_api_class(
+                methods=old_methods, **kwargs.get("old_class", {})
+            )
+        })
+        new = self._jar(tmp_path, "new.jar", {
+            "com/example/Api.class": make_api_class(
+                methods=new_methods, **kwargs.get("new_class", {})
+            )
+        })
+
+        with zipfile.ZipFile(old) as z1, zipfile.ZipFile(new) as z2:
+            entries = {"com/example/Api.class"}
+            return self.server._compare_public_api(z1, z2, entries, entries)
+
+    def test_detects_added_method(self, tmp_path):
+        result = self._diff(
+            tmp_path,
+            [("a", "()V", ACC_PUBLIC)],
+            [("a", "()V", ACC_PUBLIC), ("b", "()V", ACC_PUBLIC)],
+        )
+
+        assert result["members_added"] == 1
+        assert result["members_removed"] == 0
+        assert result["compatible"] is True
+
+    def test_detects_removed_method_as_breaking(self, tmp_path):
+        result = self._diff(
+            tmp_path,
+            [("a", "()V", ACC_PUBLIC), ("b", "()V", ACC_PUBLIC)],
+            [("a", "()V", ACC_PUBLIC)],
+        )
+
+        assert result["members_removed"] == 1
+        assert result["breaking_changes"] == 1
+        assert result["compatible"] is False
+
+    def test_identical_api_reports_no_changes(self, tmp_path):
+        methods = [("a", "()V", ACC_PUBLIC), ("b", "(I)Ljava/lang/String;", ACC_PUBLIC)]
+        result = self._diff(tmp_path, methods, methods)
+
+        assert result["members_added"] == 0
+        assert result["members_removed"] == 0
+        assert result["classes_with_api_changes"] == 0
+        assert result["compatible"] is True
+
+    def test_signature_change_is_add_plus_remove(self, tmp_path):
+        """Changing a parameter type is not a silent 'same method'."""
+        result = self._diff(
+            tmp_path,
+            [("go", "(I)V", ACC_PUBLIC)],
+            [("go", "(J)V", ACC_PUBLIC)],
+        )
+
+        assert result["members_added"] == 1
+        assert result["members_removed"] == 1
+        assert result["compatible"] is False
+
+    def test_private_changes_are_not_api_changes(self, tmp_path):
+        result = self._diff(
+            tmp_path,
+            [("a", "()V", ACC_PUBLIC), ("secret", "()V", ACC_PRIVATE)],
+            [("a", "()V", ACC_PUBLIC)],
+        )
+
+        assert result["members_removed"] == 0
+        assert result["compatible"] is True
+
+    def test_class_becoming_final_is_flagged(self, tmp_path):
+        result = self._diff(
+            tmp_path,
+            [("a", "()V", ACC_PUBLIC)],
+            [("a", "()V", ACC_PUBLIC)],
+            new_class={"class_flags": ACC_PUBLIC | ACC_FINAL},
+        )
+
+        assert any("final" in c for c in result["changes"])
+
+    def test_removed_class_counts_as_breaking(self, tmp_path):
+        old = self._jar(tmp_path, "old.jar", {
+            "com/example/Gone.class": make_api_class(methods=[("a", "()V", ACC_PUBLIC)]),
+        })
+        new = self._jar(tmp_path, "new.jar", {})
+
+        with zipfile.ZipFile(old) as z1, zipfile.ZipFile(new) as z2:
+            result = self.server._compare_public_api(
+                z1, z2, {"com/example/Gone.class"}, set()
+            )
+
+        assert result["breaking_changes"] == 1
+        assert result["compatible"] is False
+
+    @pytest.mark.asyncio
+    async def test_compare_versions_is_no_longer_a_stub(self, tmp_path):
+        """Regression guard for 'API comparison not yet implemented'."""
+        for version in ("1.0.0", "2.0.0"):
+            jar_path = (
+                self.server.cache_home
+                / f"com/example/api/{version}/api-{version}.jar"
+            )
+            jar_path.parent.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(jar_path, "w") as jar:
+                methods = [("a", "()V", ACC_PUBLIC)]
+                if version == "1.0.0":
+                    methods.append(("removed", "()V", ACC_PUBLIC))
+                jar.writestr("com/example/Api.class", make_api_class(methods=methods))
+
+        result = await self.server._compare_versions(
+            "com.example", "api", "1.0.0", "2.0.0",
+            compare_api=True, summarize_large_content=False,
+        )
+        data = json.loads(result[0].text)
+        api = data["comparison"]["api_changes"]
+
+        assert isinstance(api, dict)
+        assert api["members_removed"] == 1
+        assert api["compatible"] is False
+
+
 class TestConstantPoolParsing:
     """Bytecode scanning underpins annotation and usage search."""
 

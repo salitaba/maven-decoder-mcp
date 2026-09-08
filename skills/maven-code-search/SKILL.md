@@ -53,7 +53,7 @@ Use `get_dependencies` for direct POM dependencies and `get_dependency_tree` for
 
 Use `find_dependents` when the user asks "what installed artifacts depend on X?"
 
-Use `compare_versions` when the user asks what changed between two installed versions of the same artifact.
+Use `compare_versions` when the user asks what changed between two versions, or whether an upgrade is safe. With `compare_api` (default true) it returns added and removed public/protected members per class, a `breaking_changes` count, and a `compatible` flag. Report removals as the risk, and mention that a member which moved to a supertype still shows as removed.
 
 Use `analyze_jar` or `analyze_jar_structure` when the user asks about jar metadata, manifests, packages, resources, services, or high-level structure.
 

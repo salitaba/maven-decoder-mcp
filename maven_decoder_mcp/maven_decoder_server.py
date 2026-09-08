@@ -471,9 +471,9 @@ class MavenDecoderServer:
                         "properties": {
                             "group_id": {"type": "string", "description": "Maven group ID"},
                             "artifact_id": {"type": "string", "description": "Maven artifact ID"},
-                            "version1": {"type": "string", "description": "First version to compare"},
-                            "version2": {"type": "string", "description": "Second version to compare"},
-                            "compare_api": {"type": "boolean", "default": True, "description": "Compare public API changes"},
+                            "version1": {"type": "string", "description": "First (older) version to compare"},
+                            "version2": {"type": "string", "description": "Second (newer) version to compare"},
+                            "compare_api": {"type": "boolean", "default": True, "description": "Diff the public API: added/removed public and protected methods and fields, and breaking changes"},
                             "summarize_large_content": {"type": "boolean", "default": True, "description": "Summarize large content automatically"}
                         },
                         "required": ["group_id", "artifact_id", "version1", "version2"],
@@ -1370,10 +1370,11 @@ class MavenDecoderServer:
                 comparison["comparison"]["classes_added"] = sorted(list(classes2 - classes1))
                 comparison["comparison"]["classes_removed"] = sorted(list(classes1 - classes2))
                 comparison["comparison"]["classes_common"] = len(classes1 & classes2)
-            
-            # TODO: Add API comparison (requires bytecode analysis)
-            if compare_api:
-                comparison["comparison"]["api_changes"] = "API comparison not yet implemented"
+
+                if compare_api:
+                    comparison["comparison"]["api_changes"] = self._compare_public_api(
+                        z1, z2, classes1, classes2
+                    )
             
             if summarize_large_content and self.response_manager.should_summarize(json.dumps(comparison, indent=2)):
                 comparison["content"] = self.response_manager.summarize_large_text(json.dumps(comparison, indent=2))
@@ -1384,6 +1385,131 @@ class MavenDecoderServer:
         except Exception as e:
             return [TextContent(type="text", text=f"Error comparing versions: {str(e)}")]
     
+    @staticmethod
+    def _describe_member(name: str, descriptor: str) -> str:
+        """Render a member as ``name descriptor`` for readable diffs."""
+        return f"{name}{descriptor}"
+
+    def _compare_public_api(self, z1: zipfile.ZipFile, z2: zipfile.ZipFile,
+                            classes1: set, classes2: set) -> Dict[str, Any]:
+        """Diff the public API of two jars.
+
+        Only classes present in both versions are compared member by member;
+        wholly added or removed classes are already reported separately.
+        Members are keyed by name plus descriptor, so an overload change
+        reads as one removal and one addition rather than a false "same".
+        """
+        api_limit = int(os.getenv('MCP_API_DIFF_LIMIT', '2000'))
+
+        removed_members = []
+        added_members = []
+        changed_classes = []
+        unparseable = 0
+        compared = 0
+
+        for entry in sorted(classes1 & classes2):
+            if compared >= api_limit:
+                break
+
+            # Only the public surface matters, and nested/synthetic classes
+            # would add noise without changing the contract.
+            class_name = entry.replace('/', '.').replace('.class', '')
+
+            try:
+                api1 = self.decompiler.read_class_api(z1.read(entry))
+                api2 = self.decompiler.read_class_api(z2.read(entry))
+            except Exception:
+                unparseable += 1
+                continue
+
+            if api1 is None or api2 is None:
+                unparseable += 1
+                continue
+
+            # A class that is not public in either version is not API.
+            if not api1.get("public") and not api2.get("public"):
+                continue
+
+            compared += 1
+
+            class_changes: Dict[str, Any] = {}
+
+            if api1.get("public") and not api2.get("public"):
+                class_changes["visibility"] = "public -> non-public (breaking)"
+            elif not api1.get("public") and api2.get("public"):
+                class_changes["visibility"] = "non-public -> public"
+
+            if not api1.get("final") and api2.get("final"):
+                class_changes["final"] = "became final (breaking for subclasses)"
+
+            if not api1.get("abstract") and api2.get("abstract"):
+                class_changes["abstract"] = "became abstract (breaking)"
+
+            for kind in ("methods", "fields"):
+                old = {
+                    self._describe_member(m["name"], m["descriptor"]): m
+                    for m in api1[kind]
+                }
+                new = {
+                    self._describe_member(m["name"], m["descriptor"]): m
+                    for m in api2[kind]
+                }
+
+                gone = sorted(set(old) - set(new))
+                fresh = sorted(set(new) - set(old))
+
+                if gone:
+                    class_changes[f"{kind}_removed"] = gone
+                    for signature in gone:
+                        removed_members.append(f"{class_name}#{signature}")
+                if fresh:
+                    class_changes[f"{kind}_added"] = fresh
+                    for signature in fresh:
+                        added_members.append(f"{class_name}#{signature}")
+
+            if class_changes:
+                changed_classes.append({
+                    "class_name": class_name,
+                    **class_changes,
+                })
+
+        # Removing a public class or member is what breaks downstream code.
+        breaking = len(removed_members) + len(classes1 - classes2)
+
+        result: Dict[str, Any] = {
+            "classes_compared": compared,
+            "classes_with_api_changes": len(changed_classes),
+            "members_added": len(added_members),
+            "members_removed": len(removed_members),
+            "breaking_changes": breaking,
+            "compatible": breaking == 0,
+            "summary": (
+                f"{len(added_members)} member(s) added, "
+                f"{len(removed_members)} removed across "
+                f"{len(changed_classes)} class(es); "
+                f"{len(classes2 - classes1)} class(es) added, "
+                f"{len(classes1 - classes2)} removed"
+            ),
+            "changes": changed_classes,
+            "note": (
+                "Members are compared as declared on each class. A member "
+                "listed as removed may still be callable if it moved to a "
+                "supertype, but code compiled against the old declaration "
+                "can still break, so treat removals as suspect rather than "
+                "certain breakage."
+            ),
+        }
+
+        if unparseable:
+            result["unparseable_classes"] = unparseable
+        if compared >= api_limit:
+            result["truncated"] = (
+                f"Stopped after comparing {api_limit} classes "
+                "(raise MCP_API_DIFF_LIMIT for a full diff)"
+            )
+
+        return result
+
     async def _find_usage_examples(self, class_name: str,
                                  method_name: Optional[str] = None,
                                  search_tests: bool = True,
