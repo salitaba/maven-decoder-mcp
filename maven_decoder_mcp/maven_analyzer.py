@@ -8,19 +8,53 @@ and transitive dependency tracking.
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import re
-from typing import Dict, List, Optional, Set, Tuple, Any
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, Any
 import logging
-import requests
-import json
 
 logger = logging.getLogger(__name__)
 
 class MavenDependencyAnalyzer:
     """Advanced Maven dependency analyzer"""
-    
-    def __init__(self, maven_home: Path):
+
+    #: Cap on remote POM fetches per request, so resolving a deep transitive
+    #: tree cannot turn into hundreds of sequential network round trips.
+    DEFAULT_REMOTE_POM_BUDGET = 60
+
+    def __init__(self, maven_home: Path,
+                 extra_roots: Optional[Sequence[Path]] = None,
+                 remote_resolver: Optional[Callable[[str, str, str], Optional[Path]]] = None,
+                 remote_pom_budget: Optional[int] = None):
+        """
+        Args:
+            maven_home: The local Maven repository (``~/.m2/repository``).
+            extra_roots: Additional Maven-layout roots to search, such as the
+                remote download cache.
+            remote_resolver: Optional callable used to fetch a POM that is
+                missing from every local root. It receives
+                ``(group_id, artifact_id, version)`` and returns a path or
+                ``None``.
+            remote_pom_budget: Maximum number of POMs fetched remotely while
+                serving a single request.
+        """
         self.maven_home = maven_home
+        self.extra_roots = [Path(root) for root in (extra_roots or [])]
+        self.remote_resolver = remote_resolver
+        self.remote_pom_budget = (
+            self.DEFAULT_REMOTE_POM_BUDGET if remote_pom_budget is None
+            else remote_pom_budget
+        )
         self.cache = {}  # Simple in-memory cache
+        self._unresolvable_poms: Set[str] = set()
+        self._remote_poms_fetched = 0
+
+    def reset_remote_budget(self) -> None:
+        """Restore the remote fetch allowance for a new request."""
+        self._remote_poms_fetched = 0
+
+    @property
+    def repository_roots(self) -> List[Path]:
+        """All Maven-layout roots, most authoritative first."""
+        return [self.maven_home, *self.extra_roots]
     
     def analyze_dependencies(self, group_id: str, artifact_id: str, version: str,
                            include_transitive: bool = False,
@@ -107,10 +141,50 @@ class MavenDependencyAnalyzer:
             return {"error": str(e)}
     
     def _get_pom_path(self, group_id: str, artifact_id: str, version: str) -> Optional[Path]:
-        """Get path to POM file"""
+        """Get path to POM file, downloading it when it is missing locally.
+
+        Local roots always win; the remote resolver is only consulted for
+        coordinates that are absent everywhere, and each failure is
+        remembered so a broken lookup is not retried for every dependency.
+        """
+        if not version:
+            return None
+
         group_path = group_id.replace('.', '/')
-        pom_path = self.maven_home / group_path / artifact_id / version / f"{artifact_id}-{version}.pom"
-        return pom_path if pom_path.exists() else None
+        relative = Path(group_path) / artifact_id / version / f"{artifact_id}-{version}.pom"
+
+        for root in self.repository_roots:
+            candidate = root / relative
+            if candidate.exists():
+                return candidate
+
+        if self.remote_resolver is None:
+            return None
+
+        key = f"{group_id}:{artifact_id}:{version}"
+        if key in self._unresolvable_poms:
+            return None
+
+        if self._remote_poms_fetched >= self.remote_pom_budget:
+            logger.debug(
+                "Remote POM budget (%s) exhausted; not fetching %s",
+                self.remote_pom_budget, key,
+            )
+            return None
+
+        self._remote_poms_fetched += 1
+
+        try:
+            fetched = self.remote_resolver(group_id, artifact_id, version)
+        except Exception as exc:  # never let a network issue break analysis
+            logger.debug("Remote POM resolution failed for %s: %s", key, exc)
+            fetched = None
+
+        if fetched is None:
+            self._unresolvable_poms.add(key)
+            return None
+
+        return Path(fetched)
     
     def _remove_namespace(self, elem):
         """Remove XML namespace from element and all children"""
@@ -339,36 +413,43 @@ class MavenDependencyAnalyzer:
         return tree
     
     def get_version_info(self, group_id: str, artifact_id: str) -> Dict[str, Any]:
-        """Get available versions for an artifact"""
+        """Get available versions for an artifact across all local roots"""
         versions = []
-        
-        # Scan local repository
+        seen_versions: Set[str] = set()
+
         group_path = group_id.replace('.', '/')
-        artifact_path = self.maven_home / group_path / artifact_id
-        
-        if artifact_path.exists():
+
+        for root in self.repository_roots:
+            artifact_path = root / group_path / artifact_id
+            if not artifact_path.exists():
+                continue
+
             for version_dir in artifact_path.iterdir():
-                if version_dir.is_dir():
-                    pom_file = version_dir / f"{artifact_id}-{version_dir.name}.pom"
-                    jar_file = version_dir / f"{artifact_id}-{version_dir.name}.jar"
-                    
-                    version_info = {
-                        "version": version_dir.name,
-                        "has_pom": pom_file.exists(),
-                        "has_jar": jar_file.exists(),
-                        "path": str(version_dir)
-                    }
-                    
-                    if pom_file.exists():
-                        try:
-                            stat = pom_file.stat()
-                            version_info["pom_size"] = stat.st_size
-                            version_info["last_modified"] = stat.st_mtime
-                        except Exception:
-                            pass
-                    
-                    versions.append(version_info)
-        
+                if not version_dir.is_dir() or version_dir.name in seen_versions:
+                    continue
+
+                seen_versions.add(version_dir.name)
+                pom_file = version_dir / f"{artifact_id}-{version_dir.name}.pom"
+                jar_file = version_dir / f"{artifact_id}-{version_dir.name}.jar"
+
+                version_info = {
+                    "version": version_dir.name,
+                    "has_pom": pom_file.exists(),
+                    "has_jar": jar_file.exists(),
+                    "path": str(version_dir),
+                    "cached": root != self.maven_home
+                }
+
+                if pom_file.exists():
+                    try:
+                        stat = pom_file.stat()
+                        version_info["pom_size"] = stat.st_size
+                        version_info["last_modified"] = stat.st_mtime
+                    except Exception:
+                        pass
+
+                versions.append(version_info)
+
         # Sort versions (simple string sort, could be improved with version comparison)
         versions.sort(key=lambda x: x["version"], reverse=True)
         
@@ -385,7 +466,7 @@ class MavenDependencyAnalyzer:
         
         # This is a simplified implementation that scans local repository
         # A full implementation would need to scan all POMs
-        for pom_path in self.maven_home.rglob("*.pom"):
+        for pom_path in self._iter_local_poms():
             try:
                 tree = ET.parse(pom_path)
                 root = tree.getroot()
@@ -414,24 +495,37 @@ class MavenDependencyAnalyzer:
         
         return dependents
     
+    def _iter_local_poms(self):
+        """Yield every POM across all repository roots, deduplicated."""
+        seen: Set[Path] = set()
+        for root in self.repository_roots:
+            if not root.exists():
+                continue
+            for pom_path in root.rglob("*.pom"):
+                if pom_path in seen:
+                    continue
+                seen.add(pom_path)
+                yield pom_path
+
     def _extract_artifact_from_pom_path(self, pom_path: Path) -> Optional[Dict[str, str]]:
         """Extract artifact coordinates from POM file path"""
-        try:
-            relative_path = pom_path.relative_to(self.maven_home)
+        for root in self.repository_roots:
+            try:
+                relative_path = pom_path.relative_to(root)
+            except ValueError:
+                continue
+
             parts = relative_path.parts
-            
             if len(parts) >= 3:
                 version = parts[-2]
                 artifact_id = parts[-3]
                 group_id = '.'.join(parts[:-3])
-                
+
                 return {
                     "groupId": group_id,
                     "artifactId": artifact_id,
                     "version": version,
                     "pom_path": str(pom_path)
                 }
-        except Exception:
-            pass
-        
+
         return None

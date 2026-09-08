@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "maven-decoder-mcp"
-version = "1.0.27"
-description = "MCP server for reading and decompiling Maven .m2 jar files with comprehensive Java project analysis"
+version = "1.1.0"
+description = "MCP server for reading and decompiling Maven jar files, with online Maven Central search and comprehensive Java project analysis"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -14,7 +14,7 @@ authors = [
 maintainers = [
     {name = "Ali Tabatabaei", email = "ali79taba@gmail.com"}
 ]
-keywords = ["mcp", "maven", "java", "decompiler", "jar", "analysis", "cursor", "ide"]
+keywords = ["mcp", "maven", "java", "decompiler", "jar", "analysis", "cursor", "ide", "maven-central", "search"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

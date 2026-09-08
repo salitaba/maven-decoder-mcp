@@ -16,14 +16,24 @@ pytest_plugins = []
 
 # Environment variables for testing
 @pytest.fixture(autouse=True)
-def setup_test_env():
-    """Setup test environment variables"""
+def setup_test_env(tmp_path_factory):
+    """Setup test environment variables.
+
+    Offline mode is forced so no test can reach the network, and the download
+    cache is redirected into a temp directory so the developer's real cache is
+    never touched. Tests that exercise remote behaviour construct their own
+    client with ``offline=False`` and a mocked session.
+    """
+    cache_dir = tmp_path_factory.mktemp("maven-cache")
+
     test_env = {
         'MCP_MAX_RESPONSE_SIZE': '1000',
         'MCP_MAX_ITEMS_PER_PAGE': '5',
         'MCP_MAX_TEXT_LENGTH': '500',
         'MCP_MAX_LINES': '10',
-        'MCP_LOG_LEVEL': 'ERROR'  # Reduce log noise during tests
+        'MCP_LOG_LEVEL': 'ERROR',  # Reduce log noise during tests
+        'MAVEN_OFFLINE': 'true',
+        'MAVEN_DECODER_CACHE_DIR': str(cache_dir),
     }
     
     # Store original environment

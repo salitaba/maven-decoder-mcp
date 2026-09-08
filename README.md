@@ -2,7 +2,7 @@
 
 [![skills.sh](https://skills.sh/b/salitaba/maven-decoder-mcp)](https://skills.sh/salitaba/maven-decoder-mcp)
 
-A comprehensive Model Context Protocol (MCP) server for analyzing Maven jar files in your local repository (`~/.m2`). This server provides powerful tools for agentic coding assistance in Java projects, enabling AI agents to understand dependencies, analyze bytecode, extract source code, and navigate the Maven ecosystem.
+A comprehensive Model Context Protocol (MCP) server for analyzing Maven jar files, both in your local repository (`~/.m2`) and **online on Maven Central**. This server provides powerful tools for agentic coding assistance in Java projects, enabling AI agents to understand dependencies, analyze bytecode, extract source code, and navigate the Maven ecosystem.
 
 ## 🚀 Features
 
@@ -14,6 +14,14 @@ A comprehensive Model Context Protocol (MCP) server for analyzing Maven jar file
 - **Search Capabilities**: Find classes, methods, and dependencies across all artifacts
 - **Version Management**: Compare versions, find dependents, and track version conflicts
 
+### Online Maven Support
+- **Maven Central Search**: Find artifacts and classes that are **not installed locally**
+- **Remote Version Listing**: See every published version, not just the ones you have
+- **On-Demand Download**: Fetch any artifact (jar, sources, POM) into a local cache
+- **Transparent Fallback**: Every analysis tool automatically downloads a missing artifact, so decompiling a dependency you never installed just works
+- **Mirror Friendly**: Point it at a corporate Nexus/Artifactory, with optional credentials
+- **Offline Mode**: A single env var restores fully local, network-free behavior
+
 ### Advanced Features
 - **Decompilation Support**: Integrated support for multiple Java decompilers (CFR, Fernflower, Procyon)
 - **Conflict Analysis**: Detect and analyze dependency version conflicts
@@ -22,6 +30,7 @@ A comprehensive Model Context Protocol (MCP) server for analyzing Maven jar file
 - **Service Discovery**: Find and analyze Java services and SPI implementations
 - **Response Management**: Intelligent pagination and summarization for large responses
 - **Method Extraction**: Extract specific methods from large Java classes
+- **Integrity Checking**: Downloads are verified against the repository's SHA-1 checksums
 
 ## 📦 Installation
 
@@ -120,6 +129,8 @@ The skill is located at `skills/maven-code-search` and is ready for skills.sh in
 
 ## 🛠️ Available Tools
 
+### Local Analysis
+
 | Tool | Description |
 |------|-------------|
 | `list_artifacts` | List artifacts in Maven repository with filtering |
@@ -133,9 +144,17 @@ The skill is located at `skills/maven-code-search` and is ready for skills.sh in
 | `find_usage_examples` | Find usage examples in test code |
 | `get_dependency_tree` | Get complete dependency tree |
 | `find_dependents` | Find artifacts that depend on a specific artifact |
-| `get_version_info` | Get all available versions of an artifact |
+| `get_version_info` | Get installed versions of an artifact (set `include_remote` to add published ones) |
 | `analyze_jar_structure` | Analyze overall jar structure and metadata |
 | `extract_method_info` | Extract specific method information from Java classes |
+
+### Online (Maven Central)
+
+| Tool | Description |
+|------|-------------|
+| `search_maven_central` | Search Maven Central for artifacts by name, coordinates, or contained class |
+| `get_remote_versions` | List every version published remotely, flagging which are installed |
+| `download_artifact` | Download an artifact (jar/sources/POM) into the local cache; accepts `latest` |
 
 ## 💡 Usage Examples
 
@@ -174,6 +193,55 @@ When a dependency has no sources jar, `extract_class_info` uses `javap` internal
 "Get method information for specific patterns in a class"
 ```
 
+### Searching Maven Central (Online)
+```
+"Which Maven artifact contains the class HikariDataSource?"
+"Search Maven Central for retrofit"
+"What is the newest published version of org.apache.commons:commons-lang3?"
+"Download com.google.code.gson:gson:latest and show me the JsonParser class"
+```
+
+## 🌐 Online Maven Support
+
+The server works against the local repository **and** remote repositories. Online
+access is enabled by default.
+
+### How it works
+
+1. Every tool first looks in your local repository (`~/.m2/repository`).
+2. On a miss, the artifact is downloaded from Maven Central into a cache
+   (`~/.cache/maven-decoder-mcp/repository`) that uses the standard Maven layout.
+3. All existing analysis (decompilation, class info, dependencies) then runs on
+   the cached artifact exactly as it would on an installed one.
+
+The cache is deliberately **separate from `~/.m2`** so downloads never interfere
+with your Maven or Gradle builds. Responses include an `origin` field
+(`local-repository` or `remote-cache`) so you always know where a result came from.
+
+### Going offline
+
+```bash
+MAVEN_OFFLINE=true   # no network access at all; original local-only behavior
+MAVEN_AUTO_DOWNLOAD=false   # keep online search, but never auto-download
+```
+
+### Using a private mirror
+
+```bash
+MAVEN_REMOTE_REPOS="https://nexus.corp/repository/maven-public"
+MAVEN_REMOTE_USERNAME=builder
+MAVEN_REMOTE_PASSWORD=secret
+```
+
+### A note on the search index
+
+Artifact **downloads** use `repo1.maven.org`, which is fast and reliable.
+Artifact **search** uses `search.maven.org`, the only public index that answers
+class-level (`c:` / `fc:`) queries correctly. That index rate-limits bursts, so
+requests are retried with backoff; a busy period can still surface as a timeout.
+Downloads and version listing are unaffected, because they read
+`maven-metadata.xml` directly from the repository.
+
 ## 🔄 Response Management
 
 ### Pagination Support
@@ -208,6 +276,7 @@ The server is built with a modular architecture:
 - **`ResponseManager`**: Handles pagination and summarization
 - **`JavaDecompiler`**: Handles multiple decompilation strategies
 - **`MavenDependencyAnalyzer`**: Analyzes Maven dependencies and metadata
+- **`MavenCentralClient`**: Remote search, version listing, and artifact downloads
 - **Decompilers**: CFR, Procyon, Fernflower, and javap integration
 
 ## 🧪 Development
@@ -245,9 +314,25 @@ docker run --rm -it maven-decoder-mcp
 ## 📝 Configuration Options
 
 ### Environment Variables
+
+#### Local repository
 - `MAVEN_REPOSITORY` / `MAVEN_REPO`: direct path to local Maven repository (e.g. `F:\data\repository`). Highest precedence.
 - `MAVEN_HOME` / `M2_HOME`: Maven install dir or repository dir. A nested `repository/` subdir wins when it exists; `conf/settings.xml` `<localRepository>` honored.
 - `~/.m2/settings.xml` `<localRepository>` honored when no env var set. Fallback: `~/.m2/repository`.
+
+#### Online access
+- `MAVEN_OFFLINE`: set to `true` to disable all network access (default: `false`)
+- `MAVEN_AUTO_DOWNLOAD`: auto-fetch artifacts missing locally (default: `true`)
+- `MAVEN_REMOTE_REPOS` / `MAVEN_REMOTE_REPO`: comma/space separated repository base URLs (default: `https://repo1.maven.org/maven2`)
+- `MAVEN_SEARCH_URL`: comma/space separated Solr search endpoints (default: `https://search.maven.org/solrsearch/select`)
+- `MAVEN_DECODER_CACHE_DIR`: where downloaded artifacts are cached (default: `~/.cache/maven-decoder-mcp/repository`)
+- `MAVEN_REMOTE_USERNAME` / `MAVEN_REMOTE_PASSWORD`: basic-auth credentials for a private mirror
+- `MAVEN_HTTP_TIMEOUT`: per-request timeout in seconds (default: 30)
+- `MAVEN_HTTP_RETRIES`: retries for transient network failures (default: 3)
+- `MAVEN_MAX_DOWNLOAD_SIZE`: maximum download size in bytes (default: 104857600)
+- `MAVEN_VERIFY_CHECKSUM`: verify downloads against published SHA-1 (default: `true`)
+
+#### Responses
 - `MCP_LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
 - `MCP_MAX_RESPONSE_SIZE`: Maximum response size in bytes (default: 50000)
 - `MCP_MAX_ITEMS_PER_PAGE`: Default items per page (default: 20)
@@ -294,6 +379,32 @@ ls ~/.m2/repository
 
 # Run a Maven build to populate repository
 mvn dependency:resolve
+```
+
+**Maven Central search times out**
+
+The public search index rate-limits bursts of requests. Retries with backoff are
+built in, but during heavy throttling a search can still fail. Workarounds:
+
+```bash
+# Wait a moment and retry, or raise the retry budget
+MAVEN_HTTP_RETRIES=5
+
+# Downloads and version listing do not use the search index, so these keep
+# working even while search is throttled:
+#   get_remote_versions, download_artifact
+```
+
+**Downloads fail behind a proxy or firewall**
+```bash
+# requests honors the standard proxy variables
+export HTTPS_PROXY=http://proxy.corp:8080
+
+# Or point at an internal mirror
+export MAVEN_REMOTE_REPOS="https://nexus.corp/repository/maven-public"
+
+# Or turn the network off entirely
+export MAVEN_OFFLINE=true
 ```
 
 ## 🤝 Contributing

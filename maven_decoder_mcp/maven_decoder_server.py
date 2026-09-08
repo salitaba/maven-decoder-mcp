@@ -42,6 +42,7 @@ import xmltodict
 # Import our custom modules
 from .decompiler import JavaDecompiler
 from .maven_analyzer import MavenDependencyAnalyzer
+from .maven_central import MavenCentralClient, MavenRemoteError
 
 # Configure logging
 import os
@@ -190,13 +191,32 @@ class MavenDecoderServer:
             jar_count = len(list(self.maven_home.rglob("*.jar")))
             pom_count = len(list(self.maven_home.rglob("*.pom")))
             logger.info(f"Found {jar_count} jar files and {pom_count} POM files in repository")
-        
+
+        logger.info("Initializing remote Maven repository client...")
+        self.central = MavenCentralClient()
+        self.cache_home = self.central.cache_dir
+        self.auto_download = self._resolve_auto_download()
+        if self.central.offline:
+            logger.info("Offline mode enabled: remote Maven lookups are disabled")
+        else:
+            logger.info(
+                "Online mode: search=%s, repositories=%s, cache=%s, auto_download=%s",
+                ", ".join(self.central.search_urls),
+                ", ".join(self.central.repositories),
+                self.cache_home,
+                self.auto_download,
+            )
+
         logger.info("Initializing Java decompiler...")
         self.decompiler = JavaDecompiler()
         logger.info(f"Available decompilers: {list(self.decompiler.available_decompilers.keys())}")
         
         logger.info("Initializing Maven dependency analyzer...")
-        self.dependency_analyzer = MavenDependencyAnalyzer(self.maven_home)
+        self.dependency_analyzer = MavenDependencyAnalyzer(
+            self.maven_home,
+            extra_roots=[self.cache_home],
+            remote_resolver=self._resolve_remote_pom,
+        )
         
         logger.info("Setting up MCP server handlers...")
         self.setup_handlers()
@@ -208,6 +228,22 @@ class MavenDecoderServer:
         from .config import Config
 
         return Config.resolve_maven_repository()
+
+    @staticmethod
+    def _resolve_auto_download() -> bool:
+        """Whether missing artifacts may be fetched from a remote repository."""
+        from .config import Config
+
+        return Config.auto_download_enabled()
+
+    def _resolve_remote_pom(self, group_id: str, artifact_id: str,
+                            version: str) -> Optional[Path]:
+        """Fetch a POM from a remote repository into the cache."""
+        if not self.auto_download:
+            return None
+        return self.central.ensure_artifact(
+            group_id, artifact_id, version, extension="pom"
+        )
 
     def _ensure_server_decorators(self):
         """Provide decorator registration for newer MCP SDK request handlers."""
@@ -474,12 +510,13 @@ class MavenDecoderServer:
                 ),
                 Tool(
                     name="get_version_info",
-                    description="Get all available versions of an artifact",
+                    description="Get all available versions of an artifact, optionally including versions published remotely",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "group_id": {"type": "string", "description": "Maven group ID"},
                             "artifact_id": {"type": "string", "description": "Maven artifact ID"},
+                            "include_remote": {"type": "boolean", "default": False, "description": "Also list versions published on the remote repository (not just installed ones)"},
                             "limit": {"type": "integer", "default": 50, "description": "Maximum versions to return"},
                             "page": {"type": "integer", "default": 1, "description": "Page number for pagination"},
                             "items_per_page": {"type": "integer", "default": 20, "description": "Items per page"}
@@ -518,6 +555,57 @@ class MavenDecoderServer:
                             "max_methods": {"type": "integer", "default": 10, "description": "Maximum number of methods to return"}
                         },
                         "required": ["group_id", "artifact_id", "version", "class_name"],
+                        "additionalProperties": False
+                    }
+                ),
+                Tool(
+                    name="search_maven_central",
+                    description="Search Maven Central (or the configured mirror) online for artifacts, including ones not installed locally. Use this to discover coordinates or find which published artifact contains a class.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Free-text search term (e.g. 'jackson databind')"},
+                            "group_id": {"type": "string", "description": "Exact group ID filter (e.g. 'org.springframework')"},
+                            "artifact_id": {"type": "string", "description": "Exact artifact ID filter (e.g. 'spring-core')"},
+                            "class_name": {"type": "string", "description": "Simple class name to find the containing artifact (e.g. 'ObjectMapper')"},
+                            "fully_qualified_class": {"type": "string", "description": "Fully qualified class name (e.g. 'com.fasterxml.jackson.databind.ObjectMapper')"},
+                            "packaging": {"type": "string", "description": "Packaging filter (e.g. 'jar', 'pom')"},
+                            "all_versions": {"type": "boolean", "default": False, "description": "Return every published version instead of only the latest per artifact"},
+                            "limit": {"type": "integer", "default": 20, "description": "Maximum results to return (max 200)"},
+                            "page": {"type": "integer", "default": 1, "description": "Page number for pagination"}
+                        },
+                        "additionalProperties": False
+                    }
+                ),
+                Tool(
+                    name="get_remote_versions",
+                    description="List all versions of an artifact published on the remote repository, including versions that are not installed locally",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "group_id": {"type": "string", "description": "Maven group ID"},
+                            "artifact_id": {"type": "string", "description": "Maven artifact ID"},
+                            "limit": {"type": "integer", "default": 100, "description": "Maximum versions to return"}
+                        },
+                        "required": ["group_id", "artifact_id"],
+                        "additionalProperties": False
+                    }
+                ),
+                Tool(
+                    name="download_artifact",
+                    description="Download an artifact from the remote repository into the local analysis cache so every other tool can inspect it. Use 'latest' as the version to fetch the newest release.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "group_id": {"type": "string", "description": "Maven group ID"},
+                            "artifact_id": {"type": "string", "description": "Maven artifact ID"},
+                            "version": {"type": "string", "description": "Version to download, or 'latest' for the newest release"},
+                            "include_sources": {"type": "boolean", "default": True, "description": "Also download the sources jar when published"},
+                            "include_javadoc": {"type": "boolean", "default": False, "description": "Also download the javadoc jar when published"},
+                            "classifier": {"type": "string", "description": "Download a specific classified jar instead of the main one"},
+                            "force": {"type": "boolean", "default": False, "description": "Re-download even when the file is already cached"}
+                        },
+                        "required": ["group_id", "artifact_id", "version"],
                         "additionalProperties": False
                     }
                 )
@@ -564,6 +652,12 @@ class MavenDecoderServer:
                     return await self._analyze_jar_structure(**arguments)
                 elif name == "extract_method_info":
                     return await self._extract_method_info(**arguments)
+                elif name == "search_maven_central":
+                    return await self._search_maven_central(**arguments)
+                elif name == "get_remote_versions":
+                    return await self._get_remote_versions(**arguments)
+                elif name == "download_artifact":
+                    return await self._download_artifact(**arguments)
                 else:
                     raise ValueError(f"Unknown tool: {name}")
             except Exception as e:
@@ -649,14 +743,15 @@ class MavenDecoderServer:
                           include_bytecode: bool = False, include_manifest: bool = True,
                           summarize_large_content: bool = True) -> List[TextContent]:
         """Analyze a specific jar file"""
-        jar_path = self._get_jar_path(group_id, artifact_id, version)
+        jar_path = await self._resolve_jar_path(group_id, artifact_id, version)
         if not jar_path or not jar_path.exists():
-            return [TextContent(type="text", text=f"Jar file not found: {group_id}:{artifact_id}:{version}")]
+            return [TextContent(type="text", text=self._jar_not_found_message(group_id, artifact_id, version))]
         
         try:
             analysis = {
                 "artifact": f"{group_id}:{artifact_id}:{version}",
                 "jar_path": str(jar_path),
+                "source": self._path_origin(jar_path),
                 "size_bytes": jar_path.stat().st_size
             }
             
@@ -700,22 +795,79 @@ class MavenDecoderServer:
         except Exception as e:
             return [TextContent(type="text", text=f"Error analyzing jar: {str(e)}")]
     
+    @property
+    def repository_roots(self) -> List[Path]:
+        """Maven-layout roots to search: local repository first, then cache."""
+        return [self.maven_home, self.cache_home]
+
     def _get_jar_path(self, group_id: str, artifact_id: str, version: str) -> Optional[Path]:
-        """Get path to jar file"""
+        """Get path to a locally available jar (local repository or cache)"""
         group_path = group_id.replace('.', os.sep)
-        jar_dir = self.maven_home / group_path / artifact_id / version
-        
-        # Look for the main jar file
-        main_jar = jar_dir / f"{artifact_id}-{version}.jar"
-        if main_jar.exists():
-            return main_jar
-        
-        # Look for any jar file in the directory
-        jar_files = list(jar_dir.glob("*.jar"))
-        if jar_files:
-            return jar_files[0]
-        
+
+        for root in self.repository_roots:
+            jar_dir = root / group_path / artifact_id / version
+
+            # Look for the main jar file
+            main_jar = jar_dir / f"{artifact_id}-{version}.jar"
+            if main_jar.exists():
+                return main_jar
+
+            # Look for any non-classified jar file in the directory
+            jar_files = [
+                path for path in sorted(jar_dir.glob("*.jar"))
+                if not path.name.endswith(("-sources.jar", "-javadoc.jar"))
+            ]
+            if jar_files:
+                return jar_files[0]
+
         return None
+
+    async def _resolve_jar_path(self, group_id: str, artifact_id: str,
+                                version: str) -> Optional[Path]:
+        """Resolve a jar locally, downloading it from a remote repo if needed."""
+        jar_path = self._get_jar_path(group_id, artifact_id, version)
+        if jar_path and jar_path.exists():
+            return jar_path
+
+        if not self.auto_download:
+            return None
+
+        logger.info(
+            "Jar %s:%s:%s not found locally, fetching from remote repository",
+            group_id, artifact_id, version,
+        )
+        downloaded = await asyncio.to_thread(
+            self.central.ensure_artifact, group_id, artifact_id, version
+        )
+        return downloaded
+
+    def _path_origin(self, path: Path) -> str:
+        """Report whether a file came from the local repository or the cache."""
+        try:
+            path.relative_to(self.cache_home)
+            return "remote-cache"
+        except ValueError:
+            return "local-repository"
+
+    def _jar_not_found_message(self, group_id: str, artifact_id: str,
+                               version: str) -> str:
+        """Explain a miss, including why the remote lookup did not help."""
+        base = f"Jar file not found: {group_id}:{artifact_id}:{version}"
+        if self.central.offline:
+            return (
+                f"{base}. Offline mode is enabled, so Maven Central was not "
+                "queried. Unset MAVEN_OFFLINE to allow remote downloads."
+            )
+        if not self.auto_download:
+            return (
+                f"{base}. Auto-download is disabled; call download_artifact "
+                "first or set MAVEN_AUTO_DOWNLOAD=true."
+            )
+        return (
+            f"{base}. It is not in the local repository or cache and could not "
+            "be downloaded from any configured remote repository. Use "
+            "search_maven_central to confirm the coordinates."
+        )
     
     def _extract_packages(self, classes: List[str]) -> Dict[str, int]:
         """Extract package information from class list"""
@@ -771,9 +923,9 @@ class MavenDecoderServer:
                                  page: int = 1, items_per_page: int = 20,
                                  summarize_large_content: bool = True) -> List[TextContent]:
         """Extract detailed class information"""
-        jar_path = self._get_jar_path(group_id, artifact_id, version)
+        jar_path = await self._resolve_jar_path(group_id, artifact_id, version)
         if not jar_path or not jar_path.exists():
-            return [TextContent(type="text", text=f"Jar file not found: {group_id}:{artifact_id}:{version}")]
+            return [TextContent(type="text", text=self._jar_not_found_message(group_id, artifact_id, version))]
         
         try:
             import re
@@ -847,6 +999,7 @@ class MavenDecoderServer:
                               page: int = 1, items_per_page: int = 20) -> List[TextContent]:
         """Get Maven dependencies with enhanced analysis"""
         try:
+            self.dependency_analyzer.reset_remote_budget()
             analysis = self.dependency_analyzer.analyze_dependencies(
                 group_id, artifact_id, version, include_transitive, max_depth=3
             )
@@ -960,7 +1113,7 @@ class MavenDecoderServer:
         """Extract source code from jar or decompile"""
         # First try to find sources jar
         if prefer_sources:
-            sources_jar = self._get_sources_jar_path(group_id, artifact_id, version)
+            sources_jar = await self._resolve_sources_jar_path(group_id, artifact_id, version)
             if sources_jar and sources_jar.exists():
                 source_code = self._extract_from_sources_jar(sources_jar, class_name)
                 if source_code:
@@ -968,6 +1121,8 @@ class MavenDecoderServer:
                         "source": "sources-jar",
                         "class_name": class_name,
                         "artifact": f"{group_id}:{artifact_id}:{version}",
+                        "sources_jar_path": str(sources_jar),
+                        "origin": self._path_origin(sources_jar),
                         "code": source_code
                     }
                     if summarize_large_content and self.response_manager.should_summarize(result["code"]):
@@ -976,9 +1131,9 @@ class MavenDecoderServer:
                     return [TextContent(type="text", text=json.dumps(result, indent=2))]
         
         # Fall back to decompilation
-        jar_path = self._get_jar_path(group_id, artifact_id, version)
+        jar_path = await self._resolve_jar_path(group_id, artifact_id, version)
         if not jar_path or not jar_path.exists():
-            return [TextContent(type="text", text=f"Jar file not found: {group_id}:{artifact_id}:{version}")]
+            return [TextContent(type="text", text=self._jar_not_found_message(group_id, artifact_id, version))]
         
         try:
             decompiled_code = self.decompiler.decompile_class(jar_path, class_name)
@@ -986,6 +1141,8 @@ class MavenDecoderServer:
                 "source": "decompiled",
                 "class_name": class_name,
                 "artifact": f"{group_id}:{artifact_id}:{version}",
+                "jar_path": str(jar_path),
+                "origin": self._path_origin(jar_path),
                 "code": decompiled_code or "Failed to decompile class",
                 "available_decompilers": list(self.decompiler.available_decompilers.keys())
             }
@@ -1003,9 +1160,9 @@ class MavenDecoderServer:
                                     max_bytes: int = 65536,
                                     limit: int = 20) -> List[TextContent]:
         """Extract text resources from a jar by exact path or regex pattern."""
-        jar_path = self._get_jar_path(group_id, artifact_id, version)
+        jar_path = await self._resolve_jar_path(group_id, artifact_id, version)
         if not jar_path or not jar_path.exists():
-            return [TextContent(type="text", text=f"Jar file not found: {group_id}:{artifact_id}:{version}")]
+            return [TextContent(type="text", text=self._jar_not_found_message(group_id, artifact_id, version))]
 
         if not resource_path and not resource_pattern:
             return [TextContent(type="text", text="Either resource_path or resource_pattern is required")]
@@ -1052,11 +1209,37 @@ class MavenDecoderServer:
             return [TextContent(type="text", text=f"Error extracting jar resource: {str(e)}")]
     
     def _get_sources_jar_path(self, group_id: str, artifact_id: str, version: str) -> Optional[Path]:
-        """Get path to sources jar file"""
+        """Get path to a locally available sources jar"""
         group_path = group_id.replace('.', os.sep)
-        jar_dir = self.maven_home / group_path / artifact_id / version
-        sources_jar = jar_dir / f"{artifact_id}-{version}-sources.jar"
-        return sources_jar if sources_jar.exists() else None
+
+        for root in self.repository_roots:
+            sources_jar = (
+                root / group_path / artifact_id / version
+                / f"{artifact_id}-{version}-sources.jar"
+            )
+            if sources_jar.exists():
+                return sources_jar
+
+        return None
+
+    async def _resolve_sources_jar_path(self, group_id: str, artifact_id: str,
+                                        version: str) -> Optional[Path]:
+        """Resolve a sources jar, downloading it when available remotely.
+
+        Many artifacts publish no sources jar at all, so a miss here is normal
+        and simply falls through to decompilation.
+        """
+        sources_jar = self._get_sources_jar_path(group_id, artifact_id, version)
+        if sources_jar and sources_jar.exists():
+            return sources_jar
+
+        if not self.auto_download:
+            return None
+
+        return await asyncio.to_thread(
+            self.central.ensure_artifact,
+            group_id, artifact_id, version, "sources", "jar",
+        )
     
     def _extract_from_sources_jar(self, sources_jar: Path, class_name: str) -> Optional[str]:
         """Extract source code from sources jar"""
@@ -1074,15 +1257,15 @@ class MavenDecoderServer:
                               compare_api: bool = True,
                               summarize_large_content: bool = True) -> List[TextContent]:
         """Compare different versions of the same artifact"""
-        # Get both jar paths
-        jar1 = self._get_jar_path(group_id, artifact_id, version1)
-        jar2 = self._get_jar_path(group_id, artifact_id, version2)
+        # Get both jar paths, downloading either side when it is missing
+        jar1 = await self._resolve_jar_path(group_id, artifact_id, version1)
+        jar2 = await self._resolve_jar_path(group_id, artifact_id, version2)
         
         if not jar1 or not jar1.exists():
-            return [TextContent(type="text", text=f"Version {version1} not found")]
+            return [TextContent(type="text", text=self._jar_not_found_message(group_id, artifact_id, version1))]
         
         if not jar2 or not jar2.exists():
-            return [TextContent(type="text", text=f"Version {version2} not found")]
+            return [TextContent(type="text", text=self._jar_not_found_message(group_id, artifact_id, version2))]
         
         try:
             comparison = {
@@ -1131,6 +1314,7 @@ class MavenDecoderServer:
                                   max_depth: int = 3, summarize_large_content: bool = True) -> List[TextContent]:
         """Get complete dependency tree"""
         try:
+            self.dependency_analyzer.reset_remote_budget()
             tree = self.dependency_analyzer.find_dependency_tree(group_id, artifact_id, version)
             if summarize_large_content and self.response_manager.should_summarize(json.dumps(tree, indent=2)):
                 tree = self.response_manager.summarize_large_text(json.dumps(tree, indent=2))
@@ -1162,10 +1346,17 @@ class MavenDecoderServer:
             return [TextContent(type="text", text=f"Error finding dependents: {str(e)}")]
     
     async def _get_version_info(self, group_id: str, artifact_id: str,
+                                include_remote: bool = False,
                                 limit: int = 50, page: int = 1, items_per_page: int = 20) -> List[TextContent]:
         """Get version information for an artifact"""
         try:
             version_info = self.dependency_analyzer.get_version_info(group_id, artifact_id)
+
+            if include_remote:
+                version_info["remote"] = await self._collect_remote_versions(
+                    group_id, artifact_id, limit
+                )
+
             # Apply pagination if needed
             if self.response_manager.should_paginate(version_info):
                 version_info = self.response_manager.paginate_response(version_info, page, items_per_page)
@@ -1177,16 +1368,150 @@ class MavenDecoderServer:
             return [TextContent(type="text", text=json.dumps(version_info, indent=2))]
         except Exception as e:
             return [TextContent(type="text", text=f"Error getting version info: {str(e)}")]
-    
+
+    async def _collect_remote_versions(self, group_id: str, artifact_id: str,
+                                       limit: int) -> Dict[str, Any]:
+        """Fetch remote version info, reporting errors instead of raising."""
+        if self.central.offline:
+            return {"available": False, "reason": "offline mode is enabled"}
+
+        try:
+            return await asyncio.to_thread(
+                self.central.get_versions, group_id, artifact_id, limit
+            )
+        except MavenRemoteError as exc:
+            return {"available": False, "reason": str(exc)}
+
+    async def _search_maven_central(self, query: Optional[str] = None,
+                                    group_id: Optional[str] = None,
+                                    artifact_id: Optional[str] = None,
+                                    class_name: Optional[str] = None,
+                                    fully_qualified_class: Optional[str] = None,
+                                    packaging: Optional[str] = None,
+                                    all_versions: bool = False,
+                                    limit: int = 20,
+                                    page: int = 1) -> List[TextContent]:
+        """Search a remote Maven repository index for artifacts."""
+        try:
+            page = max(1, int(page))
+            limit = max(1, int(limit))
+            start = (page - 1) * limit
+
+            result = await asyncio.to_thread(
+                self.central.search,
+                query, group_id, artifact_id, class_name,
+                fully_qualified_class, packaging, limit, start, all_versions,
+            )
+
+            # Tell the agent which hits can be analyzed without a download.
+            for artifact in result["artifacts"]:
+                if artifact.get("version"):
+                    local = self._get_jar_path(
+                        artifact["group_id"], artifact["artifact_id"], artifact["version"]
+                    )
+                    artifact["installed_locally"] = local is not None
+
+            result["page"] = page
+            result["items_per_page"] = limit
+
+            if self.response_manager.should_summarize(json.dumps(result, indent=2)):
+                result["content"] = self.response_manager.summarize_large_text(
+                    json.dumps(result, indent=2)
+                )
+                result["summarized"] = True
+
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        except ValueError as e:
+            return [TextContent(type="text", text=f"Invalid search request: {str(e)}")]
+        except MavenRemoteError as e:
+            return [TextContent(type="text", text=f"Remote search failed: {str(e)}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error searching Maven Central: {str(e)}")]
+
+    async def _get_remote_versions(self, group_id: str, artifact_id: str,
+                                   limit: int = 100) -> List[TextContent]:
+        """List versions published on the remote repository."""
+        try:
+            result = await asyncio.to_thread(
+                self.central.get_versions, group_id, artifact_id, limit
+            )
+
+            installed = {
+                entry["version"]
+                for entry in self.dependency_analyzer.get_version_info(
+                    group_id, artifact_id
+                ).get("versions", [])
+            }
+            result["installed_versions"] = sorted(installed)
+
+            if self.response_manager.should_summarize(json.dumps(result, indent=2)):
+                result["content"] = self.response_manager.summarize_large_text(
+                    json.dumps(result, indent=2)
+                )
+                result["summarized"] = True
+
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        except MavenRemoteError as e:
+            return [TextContent(type="text", text=f"Could not list remote versions: {str(e)}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error getting remote versions: {str(e)}")]
+
+    async def _download_artifact(self, group_id: str, artifact_id: str, version: str,
+                                 include_sources: bool = True,
+                                 include_javadoc: bool = False,
+                                 classifier: Optional[str] = None,
+                                 force: bool = False) -> List[TextContent]:
+        """Download an artifact into the cache so other tools can analyze it."""
+        try:
+            resolved_version = version
+            if version.strip().lower() in ("latest", "release"):
+                resolved_version = await asyncio.to_thread(
+                    self.central.get_latest_version, group_id, artifact_id
+                )
+                if not resolved_version:
+                    return [TextContent(
+                        type="text",
+                        text=(
+                            f"Could not resolve the latest version of "
+                            f"{group_id}:{artifact_id} from any remote repository"
+                        ),
+                    )]
+
+            result = await asyncio.to_thread(
+                self.central.download_bundle,
+                group_id, artifact_id, resolved_version,
+                include_sources, include_javadoc, classifier, force,
+            )
+
+            if resolved_version != version:
+                result["requested_version"] = version
+                result["resolved_version"] = resolved_version
+
+            result["next_steps"] = (
+                "The artifact is now cached; analyze it with extract_class_info, "
+                "extract_source_code, get_dependencies, or analyze_jar using "
+                f"version '{resolved_version}'."
+            )
+
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        except MavenRemoteError as e:
+            return [TextContent(type="text", text=f"Download failed: {str(e)}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error downloading artifact: {str(e)}")]
+
     async def _analyze_jar_structure(self, group_id: str, artifact_id: str, version: str,
                                    summarize_large_content: bool = True) -> List[TextContent]:
         """Analyze jar file structure"""
-        jar_path = self._get_jar_path(group_id, artifact_id, version)
+        jar_path = await self._resolve_jar_path(group_id, artifact_id, version)
         if not jar_path or not jar_path.exists():
-            return [TextContent(type="text", text=f"Jar file not found: {group_id}:{artifact_id}:{version}")]
+            return [TextContent(type="text", text=self._jar_not_found_message(group_id, artifact_id, version))]
         
         try:
             analysis = self.decompiler.analyze_jar_structure(jar_path)
+            analysis["origin"] = self._path_origin(jar_path)
             if summarize_large_content and self.response_manager.should_summarize(json.dumps(analysis, indent=2)):
                 analysis["content"] = self.response_manager.summarize_large_text(json.dumps(analysis, indent=2))
                 analysis["summarized"] = True
@@ -1198,9 +1523,9 @@ class MavenDecoderServer:
                                  class_name: str, method_pattern: Optional[str] = None,
                                  include_bytecode: bool = False, max_methods: int = 10) -> List[TextContent]:
         """Extract specific method information from a Java class"""
-        jar_path = self._get_jar_path(group_id, artifact_id, version)
+        jar_path = await self._resolve_jar_path(group_id, artifact_id, version)
         if not jar_path or not jar_path.exists():
-            return [TextContent(type="text", text=f"Jar file not found: {group_id}:{artifact_id}:{version}")]
+            return [TextContent(type="text", text=self._jar_not_found_message(group_id, artifact_id, version))]
         
         try:
             # Get the full source code first

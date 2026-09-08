@@ -8,6 +8,7 @@ Provides comprehensive Java project analysis including:
 - Maven dependency resolution
 - Source code extraction
 - Class structure analysis
+- Online Maven Central search and on-demand artifact download
 
 Usage:
     from maven_decoder_mcp import MavenDecoderServer
@@ -20,16 +21,19 @@ Command line:
     maven-decoder-mcp
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Your Name"
 __email__ = "your-email@example.com"
 
 from .maven_decoder_server import MavenDecoderServer
 from .decompiler import JavaDecompiler
 from .maven_analyzer import MavenDependencyAnalyzer
+from .maven_central import MavenCentralClient, MavenRemoteError
 
 __all__ = [
     "MavenDecoderServer",
     "JavaDecompiler", 
     "MavenDependencyAnalyzer",
+    "MavenCentralClient",
+    "MavenRemoteError",
 ]

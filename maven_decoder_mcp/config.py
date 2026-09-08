@@ -5,7 +5,7 @@ Configuration module for Maven Decoder MCP Server
 import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 class Config:
     """Configuration settings for the Maven Decoder MCP Server"""
@@ -16,6 +16,22 @@ class Config:
     # Server configuration
     SERVER_NAME: str = "maven-decoder"
     SERVER_VERSION: str = "1.0.0"
+
+    # Remote (online) Maven support.
+    # Only the canonical index is used by default: the central.sonatype.com
+    # mirror silently returns irrelevant results for class (c:/fc:) queries
+    # and zero results for quoted terms, so a wrong answer would look like a
+    # right one. Point MAVEN_SEARCH_URL at a private index to add fallbacks.
+    DEFAULT_SEARCH_URLS: Tuple[str, ...] = (
+        "https://search.maven.org/solrsearch/select",
+    )
+    DEFAULT_REMOTE_REPOSITORIES: Tuple[str, ...] = ("https://repo1.maven.org/maven2",)
+    DEFAULT_HTTP_TIMEOUT: float = 30.0
+    DEFAULT_REMOTE_SEARCH_LIMIT: int = 20
+    # search.maven.org throttles bursts by hanging until the client times
+    # out, so a couple of backed-off retries are the difference between a
+    # working search and a spurious failure.
+    DEFAULT_HTTP_RETRIES: int = 3
     
     # Decompiler settings
     DECOMPILER_TIMEOUT: int = 30  # seconds
@@ -83,6 +99,148 @@ class Config:
     def _expand(value: str) -> Path:
         """Expand ``~`` and env vars so Windows/Unix paths both work."""
         return Path(os.path.expandvars(os.path.expanduser(value))).resolve()
+
+    @staticmethod
+    def _env_flag(names: Tuple[str, ...], default: bool) -> bool:
+        """Read a boolean env var, accepting the usual truthy spellings."""
+        for name in names:
+            value = os.environ.get(name, "").strip().lower()
+            if value:
+                return value in ("1", "true", "yes", "on", "enabled")
+        return default
+
+    @classmethod
+    def is_offline(cls) -> bool:
+        """True when all network access must be skipped.
+
+        Set ``MAVEN_OFFLINE=true`` (or ``MAVEN_DECODER_OFFLINE=true``) to run
+        the server exactly like the pre-online versions did.
+        """
+        return cls._env_flag(("MAVEN_OFFLINE", "MAVEN_DECODER_OFFLINE"), False)
+
+    @classmethod
+    def auto_download_enabled(cls) -> bool:
+        """True when local-repository misses may be fetched from a remote repo."""
+        if cls.is_offline():
+            return False
+        return cls._env_flag(("MAVEN_AUTO_DOWNLOAD",), True)
+
+    @classmethod
+    def verify_checksums(cls) -> bool:
+        """True when downloaded files are checked against their ``.sha1``."""
+        return cls._env_flag(("MAVEN_VERIFY_CHECKSUM",), True)
+
+    @classmethod
+    def resolve_search_urls(cls) -> List[str]:
+        """Resolve Solr-style search endpoints, most preferred first.
+
+        ``MAVEN_SEARCH_URL`` accepts a comma/whitespace separated list so a
+        private index can replace or precede the public ones.
+        """
+        raw = os.environ.get("MAVEN_SEARCH_URL", "").strip()
+        if raw:
+            urls = [
+                item.strip()
+                for item in raw.replace(",", " ").split()
+                if item.strip()
+            ]
+            if urls:
+                return urls
+        return list(cls.DEFAULT_SEARCH_URLS)
+
+    @classmethod
+    def http_retries(cls) -> int:
+        """Retry attempts for transient network failures (``MAVEN_HTTP_RETRIES``)."""
+        raw = os.environ.get("MAVEN_HTTP_RETRIES", "").strip()
+        try:
+            retries = int(raw)
+        except ValueError:
+            return cls.DEFAULT_HTTP_RETRIES
+        return max(0, retries)
+
+    @classmethod
+    def resolve_remote_repositories(cls) -> List[str]:
+        """Resolve remote repository base URLs, most preferred first.
+
+        ``MAVEN_REMOTE_REPOS`` (or ``MAVEN_REMOTE_REPO``) accepts a comma or
+        whitespace separated list so a corporate Nexus/Artifactory mirror can
+        replace or precede Maven Central.
+        """
+        for var in ("MAVEN_REMOTE_REPOS", "MAVEN_REMOTE_REPO"):
+            raw = os.environ.get(var, "").strip()
+            if not raw:
+                continue
+            repos = [
+                item.strip().rstrip("/")
+                for item in raw.replace(",", " ").split()
+                if item.strip()
+            ]
+            if repos:
+                return repos
+        return [repo.rstrip("/") for repo in cls.DEFAULT_REMOTE_REPOSITORIES]
+
+    @classmethod
+    def resolve_download_cache(cls) -> Path:
+        """Resolve where remotely fetched artifacts are stored.
+
+        The cache uses the standard Maven layout so every existing analysis
+        tool works against it unchanged. It is deliberately separate from the
+        real local repository to avoid interfering with Maven builds.
+        """
+        override = os.environ.get("MAVEN_DECODER_CACHE_DIR", "").strip()
+        if override:
+            return cls._expand(override)
+
+        for var in ("XDG_CACHE_HOME", "LOCALAPPDATA"):
+            base = os.environ.get(var, "").strip()
+            if base:
+                return cls._expand(base) / "maven-decoder-mcp" / "repository"
+
+        return Path.home() / ".cache" / "maven-decoder-mcp" / "repository"
+
+    @classmethod
+    def http_timeout(cls) -> float:
+        """Per-request timeout in seconds (``MAVEN_HTTP_TIMEOUT``)."""
+        raw = os.environ.get("MAVEN_HTTP_TIMEOUT", "").strip()
+        try:
+            timeout = float(raw)
+        except ValueError:
+            return cls.DEFAULT_HTTP_TIMEOUT
+        return timeout if timeout > 0 else cls.DEFAULT_HTTP_TIMEOUT
+
+    @classmethod
+    def remote_credentials(cls) -> Optional[Tuple[str, str]]:
+        """Basic-auth credentials for private mirrors, when configured."""
+        username = os.environ.get("MAVEN_REMOTE_USERNAME", "").strip()
+        password = os.environ.get("MAVEN_REMOTE_PASSWORD", "")
+        if username:
+            return (username, password)
+        return None
+
+    @classmethod
+    def max_download_bytes(cls) -> int:
+        """Refuse downloads larger than this (``MAVEN_MAX_DOWNLOAD_SIZE``)."""
+        raw = os.environ.get("MAVEN_MAX_DOWNLOAD_SIZE", "").strip()
+        try:
+            limit = int(raw)
+        except ValueError:
+            return cls.MAX_JAR_SIZE
+        return limit if limit > 0 else cls.MAX_JAR_SIZE
+
+    @classmethod
+    def get_remote_config(cls) -> dict:
+        """Snapshot of the online configuration, useful for logging."""
+        return {
+            "offline": cls.is_offline(),
+            "auto_download": cls.auto_download_enabled(),
+            "search_urls": cls.resolve_search_urls(),
+            "remote_repositories": cls.resolve_remote_repositories(),
+            "cache_dir": str(cls.resolve_download_cache()),
+            "timeout": cls.http_timeout(),
+            "retries": cls.http_retries(),
+            "verify_checksums": cls.verify_checksums(),
+            "authenticated": cls.remote_credentials() is not None,
+        }
 
     @classmethod
     def _resolve_install_dir(cls, base: Path) -> Path:

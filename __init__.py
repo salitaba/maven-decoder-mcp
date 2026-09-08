@@ -20,16 +20,19 @@ Command line:
     maven-decoder-mcp
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Your Name"
 __email__ = "your-email@example.com"
 
 from maven_decoder_mcp.maven_decoder_server import MavenDecoderServer
 from maven_decoder_mcp.decompiler import JavaDecompiler
 from maven_decoder_mcp.maven_analyzer import MavenDependencyAnalyzer
+from maven_decoder_mcp.maven_central import MavenCentralClient, MavenRemoteError
 
 __all__ = [
     "MavenDecoderServer",
     "JavaDecompiler", 
     "MavenDependencyAnalyzer",
+    "MavenCentralClient",
+    "MavenRemoteError",
 ]
