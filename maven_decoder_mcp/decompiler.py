@@ -20,45 +20,82 @@ class JavaDecompiler:
     def __init__(self):
         self.available_decompilers = self._detect_decompilers()
     
+    @staticmethod
+    def _search_roots() -> List[Path]:
+        """Directories that may hold decompiler jars, most preferred first.
+
+        The server is normally launched by an MCP client from an arbitrary
+        working directory, so relative paths alone are not enough: the jars
+        installed alongside the package and in the user cache must also be
+        found.
+        """
+        roots: List[Path] = []
+
+        override = os.environ.get("MAVEN_DECODER_DECOMPILER_DIR", "").strip()
+        if override:
+            roots.append(Path(os.path.expandvars(os.path.expanduser(override))))
+
+        package_dir = Path(__file__).resolve().parent
+        roots.extend([
+            package_dir / "decompilers",
+            package_dir.parent / "decompilers",   # source checkout layout
+            Path.home() / ".cache" / "maven-decoder-mcp" / "decompilers",
+            Path.cwd() / "decompilers",
+            Path.cwd(),
+        ])
+
+        seen = set()
+        unique = []
+        for root in roots:
+            if root not in seen:
+                seen.add(root)
+                unique.append(root)
+        return unique
+
+    def _find_jar(self, filename: str) -> Optional[str]:
+        """Locate a decompiler jar across all known roots."""
+        for root in self._search_roots():
+            candidate = root / filename
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
     def _detect_decompilers(self) -> Dict[str, str]:
         """Detect available decompilers on the system"""
         decompilers = {}
-        
+
         # Check for CFR (free Java decompiler)
         try:
-            cfr_paths = ['cfr.jar', 'decompilers/cfr.jar']
-            for cfr_path in cfr_paths:
-                if Path(cfr_path).exists():
-                    result = subprocess.run(['java', '-jar', cfr_path, '--help'], 
-                                          capture_output=True, text=True, timeout=5)
-                    if result.returncode == 0:
-                        decompilers['cfr'] = cfr_path
-                        break
+            cfr_path = self._find_jar('cfr.jar')
+            if cfr_path:
+                result = subprocess.run(['java', '-jar', cfr_path, '--help'],
+                                      capture_output=True, text=True, timeout=15)
+                if result.returncode == 0:
+                    decompilers['cfr'] = cfr_path
         except Exception:
             pass
-        
+
         # Check for Fernflower (IntelliJ's decompiler)
         try:
-            if Path('fernflower.jar').exists():
-                result = subprocess.run(['java', '-jar', 'fernflower.jar'], 
-                                      capture_output=True, text=True, timeout=5)
-                decompilers['fernflower'] = 'fernflower.jar'
+            fernflower_path = self._find_jar('fernflower.jar')
+            if fernflower_path:
+                subprocess.run(['java', '-jar', fernflower_path],
+                               capture_output=True, text=True, timeout=15)
+                decompilers['fernflower'] = fernflower_path
         except Exception:
             pass
-        
+
         # Check for Procyon
         try:
-            procyon_paths = ['procyon-decompiler.jar', 'decompilers/procyon-decompiler.jar']
-            for procyon_path in procyon_paths:
-                if Path(procyon_path).exists():
-                    result = subprocess.run(['java', '-jar', procyon_path, '--help'], 
-                                          capture_output=True, text=True, timeout=5)
-                    if result.returncode == 0:
-                        decompilers['procyon'] = procyon_path
-                        break
+            procyon_path = self._find_jar('procyon-decompiler.jar')
+            if procyon_path:
+                result = subprocess.run(['java', '-jar', procyon_path, '--help'],
+                                      capture_output=True, text=True, timeout=15)
+                if result.returncode == 0:
+                    decompilers['procyon'] = procyon_path
         except Exception:
             pass
-        
+
         # Check for javap (built-in with JDK)
         try:
             result = subprocess.run(['javap', '-help'], 
@@ -166,6 +203,73 @@ class JavaDecompiler:
             analysis["javap_output"] = javap_output
 
         return analysis
+
+    @staticmethod
+    def read_class_strings(class_data: bytes) -> Dict[str, Any]:
+        """Extract UTF-8 constant-pool entries from a .class file.
+
+        The constant pool holds every type name, annotation descriptor and
+        symbolic reference a class uses, so scanning it answers "does this
+        class use X?" without running javap or decompiling. Parsing is a
+        straight walk of the JVM spec's constant pool table, which is far
+        cheaper than spawning a process per class.
+
+        Returns a dict with the raw ``strings`` plus ``annotations``
+        (descriptors of the form ``Lcom/example/Ann;`` seen in the pool).
+        """
+        result: Dict[str, Any] = {"strings": [], "annotations": [], "parsed": False}
+
+        # magic(4) + minor(2) + major(2) + constant_pool_count(2)
+        if len(class_data) < 10 or class_data[:4] != b'\xca\xfe\xba\xbe':
+            return result
+
+        try:
+            count = int.from_bytes(class_data[8:10], 'big')
+            offset = 10
+            strings: List[str] = []
+
+            index = 1
+            while index < count:
+                if offset >= len(class_data):
+                    return result
+
+                tag = class_data[offset]
+                offset += 1
+
+                if tag == 1:  # CONSTANT_Utf8
+                    length = int.from_bytes(class_data[offset:offset + 2], 'big')
+                    offset += 2
+                    raw = class_data[offset:offset + length]
+                    offset += length
+                    strings.append(raw.decode('utf-8', errors='replace'))
+                elif tag in (7, 8, 16, 19, 20):      # 2-byte payload
+                    offset += 2
+                elif tag in (15,):                   # MethodHandle: 1 + 2
+                    offset += 3
+                elif tag in (3, 4, 9, 10, 11, 12, 17, 18):  # 4-byte payload
+                    offset += 4
+                elif tag in (5, 6):                  # Long/Double take two slots
+                    offset += 8
+                    index += 1
+                else:
+                    # Unknown tag: the pool can no longer be walked safely.
+                    return result
+
+                index += 1
+
+            annotations = sorted({
+                text[1:-1].replace('/', '.')
+                for text in strings
+                if len(text) > 2 and text.startswith('L') and text.endswith(';')
+            })
+
+            result["strings"] = strings
+            result["annotations"] = annotations
+            result["parsed"] = True
+            return result
+
+        except Exception:
+            return result
 
     def _run_javap_on_classpath(self, jar_path: Path, class_name: str,
                                 include_bytecode: bool = False) -> Optional[str]:

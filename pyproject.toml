@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "maven-decoder-mcp"
-version = "1.1.0"
+version = "1.2.0"
 description = "MCP server for reading and decompiling Maven jar files, with online Maven Central search and comprehensive Java project analysis"
 readme = "README.md"
 license = {text = "MIT"}
@@ -61,7 +61,7 @@ Repository = "https://github.com/salitaba/maven-decoder-mcp.git"
 
 [project.scripts]
 maven-decoder-mcp = "maven_decoder_mcp.maven_decoder_server:main"
-maven-decoder-setup = "setup:main"
+maven-decoder-setup = "maven_decoder_mcp.setup_tool:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

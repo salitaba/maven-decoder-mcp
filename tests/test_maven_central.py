@@ -500,6 +500,266 @@ class TestAnalyzerRemotePoms:
         resolver.assert_not_called()
 
 
+def make_class_bytes(strings, extra_tags=True):
+    """Build a minimal .class file whose constant pool holds given strings."""
+    import struct
+
+    entries = b""
+    count = 1  # pool is 1-indexed; count is entries + 1
+
+    for text in strings:
+        raw = text.encode("utf-8")
+        entries += bytes([1]) + struct.pack(">H", len(raw)) + raw
+        count += 1
+
+    if extra_tags:
+        # A CONSTANT_Class (tag 7, 2-byte payload) and a CONSTANT_Integer
+        # (tag 3, 4-byte payload) exercise the pool walker's skip logic.
+        entries += bytes([7]) + struct.pack(">H", 1)
+        count += 1
+        entries += bytes([3]) + struct.pack(">I", 42)
+        count += 1
+
+    return (
+        b"\xca\xfe\xba\xbe"          # magic
+        + struct.pack(">H", 0)       # minor
+        + struct.pack(">H", 61)      # major (Java 17)
+        + struct.pack(">H", count)   # constant_pool_count
+        + entries
+    )
+
+
+class TestConstantPoolParsing:
+    """Bytecode scanning underpins annotation and usage search."""
+
+    def test_reads_utf8_entries(self):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        data = make_class_bytes(["com/example/Foo", "Ljava/lang/Deprecated;"])
+        result = JavaDecompiler.read_class_strings(data)
+
+        assert result["parsed"] is True
+        assert "com/example/Foo" in result["strings"]
+
+    def test_extracts_annotation_descriptors(self):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        data = make_class_bytes(["Lorg/springframework/stereotype/Service;"])
+        result = JavaDecompiler.read_class_strings(data)
+
+        assert "org.springframework.stereotype.Service" in result["annotations"]
+
+    def test_rejects_non_class_data(self):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        assert JavaDecompiler.read_class_strings(b"not a class")["parsed"] is False
+        assert JavaDecompiler.read_class_strings(b"")["parsed"] is False
+
+    def test_truncated_class_does_not_raise(self):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        data = make_class_bytes(["com/example/Foo"])[:12]
+        assert JavaDecompiler.read_class_strings(data)["parsed"] is False
+
+
+class TestAnnotationSearch:
+    """search_classes(annotation=...) must filter, not silently return zero."""
+
+    @pytest.fixture(autouse=True)
+    def isolated_repo(self, tmp_path):
+        """Scan only fixture jars, never the developer's real ~/.m2."""
+        self.server = MavenDecoderServer(maven_repository=tmp_path / "m2")
+        self.server.cache_home = tmp_path / "cache"
+        self.server.cache_home.mkdir(parents=True, exist_ok=True)
+
+    def test_matches_simple_name_case_insensitively(self):
+        data = make_class_bytes(["Lorg/springframework/stereotype/Service;"])
+
+        assert self.server._matching_annotations(data, "Service")
+        assert self.server._matching_annotations(data, "service")
+        assert self.server._matching_annotations(data, "@Service")
+
+    def test_matches_fully_qualified_name(self):
+        data = make_class_bytes(["Lorg/springframework/stereotype/Service;"])
+
+        found = self.server._matching_annotations(
+            data, "org.springframework.stereotype.Service"
+        )
+        assert found == ["org.springframework.stereotype.Service"]
+
+    def test_does_not_match_unrelated_annotation(self):
+        data = make_class_bytes(["Lorg/springframework/stereotype/Service;"])
+
+        assert self.server._matching_annotations(data, "Deprecated") == []
+
+    def test_unparseable_class_yields_no_match(self):
+        assert self.server._matching_annotations(b"garbage", "Service") == []
+
+    @pytest.mark.asyncio
+    async def test_annotation_filter_reported_in_result(self, tmp_path):
+        jar_path = self.server.cache_home / "com/example/ann/1.0.0/ann-1.0.0.jar"
+        jar_path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(jar_path, "w") as jar:
+            jar.writestr(
+                "com/example/Annotated.class",
+                make_class_bytes(["Lcom/example/Marker;"]),
+            )
+            jar.writestr(
+                "com/example/Plain.class",
+                make_class_bytes(["Lcom/example/Other;"]),
+            )
+
+        result = await self.server._search_classes(
+            package_pattern="com.example", annotation="Marker", limit=10
+        )
+        data = json.loads(result[0].text)
+
+        assert data["annotation_filter"] == "Marker"
+        names = [m["simple_name"] for m in data["matches"]]
+        assert "Annotated" in names
+        assert "Plain" not in names
+
+
+class TestUsageExamples:
+    """find_usage_examples must return real callers, not a stub."""
+
+    @pytest.fixture(autouse=True)
+    def isolated_repo(self, tmp_path):
+        """Scan only fixture jars.
+
+        The developer's real ~/.m2 holds hundreds of thousands of classes,
+        which would exhaust the scan budget before reaching the fixtures and
+        make results depend on the host.
+        """
+        self.server = MavenDecoderServer(maven_repository=tmp_path / "m2")
+        self.server.cache_home = tmp_path / "cache"
+        self.server.cache_home.mkdir(parents=True, exist_ok=True)
+
+    def _make_jar(self, name="lib-1.0.0.jar"):
+        jar_path = self.server.cache_home / f"com/example/lib/1.0.0/{name}"
+        jar_path.parent.mkdir(parents=True, exist_ok=True)
+        return jar_path
+
+    @pytest.mark.asyncio
+    async def test_finds_class_that_references_target(self):
+        jar_path = self._make_jar()
+        with zipfile.ZipFile(jar_path, "w") as jar:
+            jar.writestr(
+                "com/example/Caller.class",
+                make_class_bytes(["com/example/Target", "doWork"]),
+            )
+            jar.writestr(
+                "com/example/Unrelated.class",
+                make_class_bytes(["com/example/Something"]),
+            )
+
+        result = await self.server._find_usage_examples(
+            class_name="com.example.Target", limit=10
+        )
+        data = json.loads(result[0].text)
+
+        users = [m["using_class"] for m in data["matches"]]
+        assert "com.example.Caller" in users
+        assert "com.example.Unrelated" not in users
+
+    @pytest.mark.asyncio
+    async def test_method_name_narrows_results(self):
+        jar_path = self._make_jar("lib2-1.0.0.jar")
+        with zipfile.ZipFile(jar_path, "w") as jar:
+            jar.writestr(
+                "com/example/UsesMethod.class",
+                make_class_bytes(["com/example/Target", "doWork"]),
+            )
+            jar.writestr(
+                "com/example/OtherMethod.class",
+                make_class_bytes(["com/example/Target", "somethingElse"]),
+            )
+
+        result = await self.server._find_usage_examples(
+            class_name="com.example.Target", method_name="doWork", limit=10
+        )
+        data = json.loads(result[0].text)
+
+        users = [m["using_class"] for m in data["matches"]]
+        assert "com.example.UsesMethod" in users
+        assert "com.example.OtherMethod" not in users
+
+    @pytest.mark.asyncio
+    async def test_no_matches_returns_actionable_hint(self):
+        result = await self.server._find_usage_examples(
+            class_name="com.nonexistent.Nothing", limit=5
+        )
+        data = json.loads(result[0].text)
+
+        assert data["total_matches"] == 0
+        assert "hint" in data
+
+    @pytest.mark.asyncio
+    async def test_empty_class_name_is_rejected(self):
+        result = await self.server._find_usage_examples(class_name="   ")
+        assert "required" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_result_is_no_longer_a_stub(self):
+        """Regression guard for the old 'not yet implemented' response."""
+        result = await self.server._find_usage_examples(class_name="com.example.X")
+        assert "not yet implemented" not in result[0].text
+
+
+class TestSetupTool:
+    """The maven-decoder-setup console script must be importable and runnable."""
+
+    def test_entry_point_target_exists(self):
+        from maven_decoder_mcp.setup_tool import main
+
+        assert callable(main)
+
+    def test_status_command_succeeds(self, capsys):
+        from maven_decoder_mcp.setup_tool import show_status
+
+        assert show_status() == 0
+        assert "maven-decoder-mcp" in capsys.readouterr().out
+
+    def test_pyproject_points_at_a_real_module(self):
+        import importlib
+
+        root = Path(__file__).resolve().parent.parent
+        pyproject = (root / "pyproject.toml").read_text()
+        target = re.search(
+            r'^maven-decoder-setup = "([^:]+):(\w+)"', pyproject, re.MULTILINE
+        )
+        assert target, "maven-decoder-setup entry point missing"
+
+        module = importlib.import_module(target.group(1))
+        assert hasattr(module, target.group(2))
+
+
+class TestDecompilerDiscovery:
+    """Decompiler jars must be found regardless of working directory."""
+
+    def test_search_roots_are_absolute(self):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        roots = JavaDecompiler._search_roots()
+        assert roots
+        assert all(r.is_absolute() for r in roots)
+
+    def test_env_override_takes_precedence(self, tmp_path):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        with patch.dict(os.environ, {"MAVEN_DECODER_DECOMPILER_DIR": str(tmp_path)}):
+            assert JavaDecompiler._search_roots()[0] == tmp_path
+
+    def test_finds_jar_in_override_dir(self, tmp_path):
+        from maven_decoder_mcp.decompiler import JavaDecompiler
+
+        (tmp_path / "cfr.jar").write_bytes(b"fake")
+        with patch.dict(os.environ, {"MAVEN_DECODER_DECOMPILER_DIR": str(tmp_path)}):
+            found = JavaDecompiler.__new__(JavaDecompiler)._find_jar("cfr.jar")
+
+        assert found == str(tmp_path / "cfr.jar")
+
+
 class TestVersionReporting:
     """The version reported to MCP clients must track the packaged version."""
 

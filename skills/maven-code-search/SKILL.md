@@ -57,7 +57,9 @@ Use `compare_versions` when the user asks what changed between two installed ver
 
 Use `analyze_jar` or `analyze_jar_structure` when the user asks about jar metadata, manifests, packages, resources, services, or high-level structure.
 
-Use `find_usage_examples` when the user asks how a class or method is used in installed test jars.
+Use `find_usage_examples` when the user asks how a class or method is used, or which installed artifacts call it. It scans bytecode references, so it finds real callers rather than guesses, and ranks test jars first. Pass `method_name` to narrow to a specific call.
+
+Use `search_classes` with `annotation` to find classes carrying an annotation, such as `Deprecated` or a Spring stereotype. The annotation may be a simple name, a fully qualified name, or a pattern.
 
 ## Query Patterns
 

@@ -137,11 +137,11 @@ The skill is located at `skills/maven-code-search` and is ready for skills.sh in
 | `analyze_jar` | Analyze jar file structure and contents |
 | `extract_class_info` | Get detailed information about Java classes |
 | `get_dependencies` | Retrieve Maven dependencies from POM files |
-| `search_classes` | Search for classes across all jars |
+| `search_classes` | Search for classes across all jars, optionally filtered by annotation |
 | `extract_source_code` | Decompile and extract Java source code |
 | `extract_jar_resource` | Extract text resources such as `.proto` files, services, and metadata |
 | `compare_versions` | Compare different versions of artifacts |
-| `find_usage_examples` | Find usage examples in test code |
+| `find_usage_examples` | Find classes that reference a given class or method |
 | `get_dependency_tree` | Get complete dependency tree |
 | `find_dependents` | Find artifacts that depend on a specific artifact |
 | `get_version_info` | Get installed versions of an artifact (set `include_remote` to add published ones) |
@@ -338,6 +338,8 @@ docker run --rm -it maven-decoder-mcp
 - `MCP_MAX_ITEMS_PER_PAGE`: Default items per page (default: 20)
 - `MCP_MAX_TEXT_LENGTH`: Maximum text length before summarization (default: 10000)
 - `MCP_MAX_LINES`: Maximum lines before summarization (default: 500)
+- `MCP_USAGE_SCAN_LIMIT`: Max classes scanned by `find_usage_examples` (default: 200000)
+- `MAVEN_DECODER_DECOMPILER_DIR`: Directory holding `cfr.jar` / `procyon-decompiler.jar`
 
 ### Advanced Configuration
 The server automatically detects and configures:
@@ -365,12 +367,14 @@ maven-decoder-mcp --debug
 
 **Decompilation fails**
 ```bash
-# Check Java installation
-java -version
+# Check the environment: Java, repository, cache and available decompilers
+maven-decoder-setup status
 
-# Setup decompilers manually
+# Install the optional CFR and Procyon decompilers
 maven-decoder-setup decompilers
 ```
+Without CFR or Procyon the server still works, falling back to `javap` from
+the JDK for signatures, fields and methods.
 
 **No artifacts found**
 ```bash

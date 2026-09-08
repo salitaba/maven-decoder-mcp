@@ -863,6 +863,55 @@ class MavenDecoderServer:
         )
         return downloaded
 
+    def _iter_local_jars(self):
+        """Yield every analyzable jar across all roots, deduplicated.
+
+        Sources and javadoc jars are skipped: they hold no bytecode, so they
+        only add scan time to class searches.
+        """
+        seen = set()
+        for root in self.repository_roots:
+            if not root.exists():
+                continue
+            for jar_path in root.rglob("*.jar"):
+                if jar_path.name.endswith(("-sources.jar", "-javadoc.jar")):
+                    continue
+                if jar_path in seen:
+                    continue
+                seen.add(jar_path)
+                yield jar_path
+
+    def _matching_annotations(self, class_data: bytes, annotation: str) -> List[str]:
+        """Return annotations on a class matching a name or pattern.
+
+        Accepts a simple name (``Deprecated``), a fully qualified name, or a
+        regex. Matching is case-insensitive on the simple name so agents can
+        ask for what they remember.
+        """
+        import re
+
+        info = self.decompiler.read_class_strings(class_data)
+        if not info.get("parsed"):
+            return []
+
+        needle = annotation.lstrip('@')
+        try:
+            pattern = re.compile(needle.replace('*', '.*'), re.IGNORECASE)
+        except re.error:
+            pattern = None
+
+        found = []
+        for candidate in info["annotations"]:
+            simple = candidate.split('.')[-1]
+            if (
+                candidate == needle
+                or simple.lower() == needle.lower()
+                or (pattern is not None and pattern.search(candidate))
+            ):
+                found.append(candidate)
+
+        return found
+
     def _path_origin(self, path: Path) -> str:
         """Report whether a file came from the local repository or the cache."""
         try:
@@ -1044,13 +1093,13 @@ class MavenDecoderServer:
                             package_pattern: Optional[str] = None,
                             annotation: Optional[str] = None,
                             limit: int = 100, page: int = 1, items_per_page: int = 20) -> List[TextContent]:
-        """Search for classes across all jars"""
+        """Search for classes across all jars in every local root"""
         import re
         matches = []
         count = 0
         
         try:
-            for jar_path in self.maven_home.rglob("*.jar"):
+            for jar_path in self._iter_local_jars():
                 if count >= limit:
                     break
                 
@@ -1073,17 +1122,26 @@ class MavenDecoderServer:
                             if package_pattern and not re.search(package_pattern, package):
                                 continue
                             
-                            # TODO: Add annotation search (requires bytecode analysis)
-                            if annotation:
-                                continue  # Skip for now
-                            
-                            matches.append({
+                            match_info = {
                                 "class_name": class_full_name,
                                 "simple_name": simple_name,
                                 "package": package,
                                 "jar_path": str(jar_path),
                                 "artifact_info": self._extract_artifact_info_from_path(jar_path)
-                            })
+                            }
+
+                            # Annotation filtering needs the constant pool, so
+                            # only pay that cost for classes that already match
+                            # the cheaper name/package filters.
+                            if annotation:
+                                found = self._matching_annotations(
+                                    jar.read(class_file), annotation
+                                )
+                                if not found:
+                                    continue
+                                match_info["matched_annotations"] = found
+
+                            matches.append(match_info)
                             count += 1
                 
                 except Exception:
@@ -1093,6 +1151,8 @@ class MavenDecoderServer:
                 "total_matches": len(matches),
                 "matches": matches
             }
+            if annotation:
+                result["annotation_filter"] = annotation
             
             # Apply pagination if needed
             if self.response_manager.should_paginate(result):
@@ -1328,9 +1388,135 @@ class MavenDecoderServer:
                                  method_name: Optional[str] = None,
                                  search_tests: bool = True,
                                  limit: int = 50, page: int = 1, items_per_page: int = 20) -> List[TextContent]:
-        """Find usage examples in test jars"""
-        # TODO: Implement usage search in test jars and source code
-        return [TextContent(type="text", text="Usage example search not yet implemented")]
+        """Find classes that reference a given class, and optionally a method.
+
+        A class that uses another class carries that type (and any method it
+        calls) in its constant pool, so scanning the pool finds real callers
+        without decompiling every candidate.
+        """
+        try:
+            target = class_name.strip()
+            if not target:
+                return [TextContent(type="text", text="class_name is required")]
+
+            simple_target = target.split('.')[-1]
+            # Constant pool stores internal form: com/example/Foo
+            internal = target.replace('.', '/')
+            internal_bytes = internal.encode('utf-8')
+
+            matches = []
+            scanned = 0
+            seen_classes = set()
+            # A full repository can hold hundreds of thousands of classes;
+            # cap the scan so the tool stays responsive.
+            scan_budget = int(os.getenv('MCP_USAGE_SCAN_LIMIT', '200000'))
+            budget_exhausted = False
+
+            for jar_path in self._iter_local_jars():
+                if len(matches) >= limit or budget_exhausted:
+                    break
+
+                # Test jars are the best usage examples, but most local
+                # repositories hold very few, so other jars are still scanned
+                # and simply ranked lower.
+                is_test_jar = 'test' in jar_path.name.lower()
+
+                try:
+                    with zipfile.ZipFile(jar_path, 'r') as jar:
+                        for entry in jar.namelist():
+                            if len(matches) >= limit:
+                                break
+                            if scanned >= scan_budget:
+                                budget_exhausted = True
+                                break
+                            if not entry.endswith('.class'):
+                                continue
+
+                            user_class = entry.replace('/', '.').replace('.class', '')
+                            # A class always references itself.
+                            if user_class == target:
+                                continue
+                            # The same class appears in many artifact versions;
+                            # report each distinct class once.
+                            if user_class in seen_classes:
+                                continue
+
+                            raw = jar.read(entry)
+                            scanned += 1
+
+                            # Cheap pre-filter: if the internal name does not
+                            # appear anywhere in the raw bytes, the class
+                            # cannot reference it, so skip the pool parse.
+                            if internal_bytes not in raw:
+                                continue
+
+                            info = self.decompiler.read_class_strings(raw)
+                            if not info.get("parsed"):
+                                continue
+
+                            strings = set(info["strings"])
+
+                            references_class = (
+                                internal in strings
+                                or target in strings
+                                or any(internal in s for s in strings)
+                            )
+                            if not references_class:
+                                continue
+
+                            if method_name and method_name not in strings:
+                                continue
+
+                            seen_classes.add(user_class)
+                            matches.append({
+                                "using_class": user_class,
+                                "jar_path": str(jar_path),
+                                "is_test_jar": is_test_jar,
+                                "artifact_info": self._extract_artifact_info_from_path(jar_path),
+                                "references": target,
+                                "method": method_name,
+                            })
+
+                except Exception:
+                    continue  # Skip corrupted jars
+
+            # Surface test-jar usages first: they are the best examples.
+            matches.sort(key=lambda m: (not m["is_test_jar"], m["using_class"]))
+
+            result = {
+                "target_class": target,
+                "target_simple_name": simple_target,
+                "method_name": method_name,
+                "classes_scanned": scanned,
+                "total_matches": len(matches),
+                "matches": matches,
+            }
+            if budget_exhausted:
+                result["truncated"] = (
+                    f"Stopped after scanning {scanned} classes "
+                    "(raise MCP_USAGE_SCAN_LIMIT to search further)"
+                )
+
+            if not matches:
+                result["hint"] = (
+                    "No local artifact references this class. It may not be "
+                    "used by anything installed; try search_maven_central to "
+                    "find published artifacts instead."
+                )
+
+            if self.response_manager.should_paginate(result):
+                result = self.response_manager.paginate_response(result, page, items_per_page)
+
+            if self.response_manager.should_summarize(json.dumps(result, indent=2)):
+                result["content"] = self.response_manager.summarize_large_text(
+                    json.dumps(result, indent=2)
+                )
+                result["summarized"] = True
+
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error finding usage examples: {str(e)}")]
     
     async def _get_dependency_tree(self, group_id: str, artifact_id: str, version: str,
                                   max_depth: int = 3, summarize_large_content: bool = True) -> List[TextContent]:
