@@ -11,6 +11,7 @@ import json
 import os
 import zipfile
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import logging
@@ -362,6 +363,7 @@ class MavenDecoderServer:
                             "group_id": {"type": "string", "description": "Filter by group ID (e.g., 'org.springframework')"},
                             "artifact_id": {"type": "string", "description": "Filter by artifact ID (e.g., 'spring-core')"},
                             "version": {"type": "string", "description": "Filter by version (e.g., '5.3.21')"},
+                            "sort_by": {"type": "string", "default": "name", "description": "Order results by: 'name' (group/artifact/version ascending, default), 'size' (largest jars first), or 'modified' (most recently modified first). Unknown values fall back to 'name'."},
                             "limit": {"type": "integer", "default": 50, "description": "Maximum number of artifacts to return"},
                             "page": {"type": "integer", "default": 1, "description": "Page number for pagination"},
                             "items_per_page": {"type": "integer", "default": 20, "description": "Items per page"}
@@ -702,17 +704,17 @@ class MavenDecoderServer:
                 logger.error(f"Error handling tool {name}: {e}", exc_info=True)
                 return [TextContent(type="text", text=f"Error: {str(e)}")]
     
-    async def _list_artifacts(self, group_id: Optional[str] = None, 
-                            artifact_id: Optional[str] = None, 
-                            version: Optional[str] = None, 
+    async def _list_artifacts(self, group_id: Optional[str] = None,
+                            artifact_id: Optional[str] = None,
+                            version: Optional[str] = None,
+                            sort_by: str = "name",
                             limit: int = 50, page: int = 1, items_per_page: int = 20) -> List[TextContent]:
         """List Maven artifacts with optional filtering"""
-        logger.debug(f"Listing artifacts with filters: group_id={group_id}, artifact_id={artifact_id}, version={version}, limit={limit}, page={page}, items_per_page={items_per_page}")
+        logger.debug(f"Listing artifacts with filters: group_id={group_id}, artifact_id={artifact_id}, version={version}, sort_by={sort_by}, limit={limit}, page={page}, items_per_page={items_per_page}")
         artifacts = []
-        count = 0
         if not self.maven_home.exists() or not self.maven_home.is_dir():
             return [TextContent(type="text", text=self._missing_repository_message())]
-        
+
         try:
             logger.debug(f"Scanning Maven repository: {self.maven_home}")
             group_dirs = [p for p in self.maven_home.iterdir() if p.is_dir()]
@@ -744,31 +746,49 @@ class MavenDecoderServer:
                         # Check if this version directory contains jar files
                         jar_files = list(version_dir.glob("*.jar"))
                         if jar_files:
+                            stats = [f.stat() for f in jar_files]
+                            size_bytes = sum(s.st_size for s in stats)
+                            mtime = max(s.st_mtime for s in stats)
                             artifacts.append({
                                 "group_id": self._path_to_group_id(group_path),
                                 "artifact_id": artifact_name,
                                 "version": version_name,
                                 "jar_files": [f.name for f in jar_files],
-                                "path": str(version_dir)
+                                "size_bytes": size_bytes,
+                                "last_modified": datetime.fromtimestamp(
+                                    mtime, timezone.utc
+                                ).astimezone().isoformat(),
+                                "path": str(version_dir),
+                                # Sort key only: comparing floats is cheaper and
+                                # exact, where the ISO string above is for
+                                # display. Removed before output.
+                                "_mtime": mtime,
                             })
-                            count += 1
-                            if count >= limit:
-                                break
-                    
-                    if count >= limit:
-                        break
-                    
-                    if count >= limit:
-                        break
-                if count >= limit:
-                    break
-            
+
+            # Sort the full result set before slicing so the returned page
+            # reflects the requested order. Filesystem iteration order is
+            # otherwise arbitrary and unstable across machines. An unknown
+            # sort_by falls back to "name" rather than raising.
+            if sort_by == "size":
+                artifacts.sort(key=lambda a: a["size_bytes"], reverse=True)
+            elif sort_by == "modified":
+                artifacts.sort(key=lambda a: a["_mtime"], reverse=True)
+            else:
+                artifacts.sort(
+                    key=lambda a: (a["group_id"], a["artifact_id"], a["version"])
+                )
+
+            page_items = [
+                {k: v for k, v in a.items() if k != "_mtime"}
+                for a in artifacts[:limit]
+            ]
+
             result = {
-                "total_found": count,
-                "artifacts": artifacts[:limit]
+                "total_found": len(artifacts),
+                "artifacts": page_items
             }
-            
-            logger.info(f"Found {count} artifacts matching criteria")
+
+            logger.info(f"Found {len(artifacts)} artifacts matching criteria")
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
         except Exception as e:

@@ -7,6 +7,7 @@ import pytest
 import json
 import os
 import zipfile
+from datetime import datetime
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
 
@@ -412,6 +413,87 @@ class TestIntegration:
         # Simplified test - just check that the server has the expected structure
         assert hasattr(self.server, 'server')
         assert hasattr(self.server.server, 'list_tools')
+
+
+class TestListArtifactsSorting:
+    """_list_artifacts orders results by sort_by; default is a stable 'name' order."""
+
+    @pytest.fixture
+    def server(self, tmp_path):
+        instance = MavenDecoderServer(maven_repository=tmp_path / "m2")
+        instance.cache_home = tmp_path / "cache"
+        instance.cache_home.mkdir(parents=True, exist_ok=True)
+        return instance
+
+    def _make_artifact(self, server, artifact_id, size, mtime):
+        jar_path = (
+            server.maven_home
+            / "grp"
+            / artifact_id
+            / "1.0.0"
+            / f"{artifact_id}-1.0.0.jar"
+        )
+        jar_path.parent.mkdir(parents=True, exist_ok=True)
+        jar_path.write_bytes(b"x" * size)
+        os.utime(jar_path, (mtime, mtime))
+        return jar_path
+
+    def _build_repo(self, server):
+        # (artifact_id, size_bytes, mtime): alpha oldest/smallest,
+        # beta largest, gamma newest.
+        self._make_artifact(server, "alpha", size=100, mtime=1_000)
+        self._make_artifact(server, "beta", size=300, mtime=2_000)
+        self._make_artifact(server, "gamma", size=200, mtime=3_000)
+
+    async def _order(self, server, **kwargs):
+        result = await server._list_artifacts(**kwargs)
+        payload = json.loads(result[0].text)
+        return [a["artifact_id"] for a in payload["artifacts"]], payload
+
+    @pytest.mark.asyncio
+    async def test_default_is_name_order(self, server):
+        self._build_repo(server)
+        order, payload = await self._order(server)
+        assert order == ["alpha", "beta", "gamma"]
+        # New fields are always present.
+        assert payload["artifacts"][0]["size_bytes"] == 100
+        assert "last_modified" in payload["artifacts"][0]
+
+    @pytest.mark.asyncio
+    async def test_size_orders_largest_first(self, server):
+        self._build_repo(server)
+        order, _ = await self._order(server, sort_by="size")
+        assert order == ["beta", "gamma", "alpha"]
+
+    @pytest.mark.asyncio
+    async def test_modified_orders_newest_first(self, server):
+        self._build_repo(server)
+        order, _ = await self._order(server, sort_by="modified")
+        assert order == ["gamma", "beta", "alpha"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_sort_falls_back_to_name(self, server):
+        self._build_repo(server)
+        order, _ = await self._order(server, sort_by="bogus")
+        assert order == ["alpha", "beta", "gamma"]
+
+    @pytest.mark.asyncio
+    async def test_limit_slices_after_sorting(self, server):
+        """The page is the top of the sorted set, not the first files scanned."""
+        self._build_repo(server)
+        order, payload = await self._order(server, sort_by="size", limit=1)
+        assert order == ["beta"]
+        # total_found reports every match, not just the returned page.
+        assert payload["total_found"] == 3
+
+    @pytest.mark.asyncio
+    async def test_last_modified_carries_utc_offset(self, server):
+        self._build_repo(server)
+        _, payload = await self._order(server)
+        stamp = payload["artifacts"][0]["last_modified"]
+        parsed = datetime.fromisoformat(stamp)
+        assert parsed.tzinfo is not None
+        assert parsed.timestamp() == pytest.approx(1_000)
 
 
 if __name__ == "__main__":
