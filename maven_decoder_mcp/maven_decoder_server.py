@@ -1884,17 +1884,30 @@ class MavenDecoderServer:
             if jar_path.is_file():
                 with zipfile.ZipFile(jar_path, "r"):
                     pass
-            # Get the full source code first
-            source_code = await self._extract_source_code_internal(jar_path, class_name)
+            # Prefer real source from a sources jar: it carries Javadoc, which
+            # decompiled output almost never does. Fall back to decompilation.
+            source_code = None
+            source = None
+            sources_jar = await self._resolve_sources_jar_path(
+                group_id, artifact_id, version
+            )
+            if sources_jar and sources_jar.exists():
+                source_code = self._extract_from_sources_jar(sources_jar, class_name)
+                if source_code:
+                    source = "sources-jar"
+            if not source_code:
+                source_code = await self._extract_source_code_internal(jar_path, class_name)
+                source = "decompiled"
             if not source_code:
                 return [TextContent(type="text", text=f"Could not extract source code for class: {class_name}")]
-            
+
             # Parse methods from source code
             methods = self._extract_methods_from_source(source_code, method_pattern, max_methods)
-            
+
             result = {
                 "class_name": class_name,
                 "artifact": f"{group_id}:{artifact_id}:{version}",
+                "source": source,
                 "total_methods_found": len(methods),
                 "methods": methods,
                 "method_pattern": method_pattern or "all methods"
@@ -1948,6 +1961,7 @@ class MavenDecoderServer:
                     "name": method_name,
                     "return_type": match.group(2),
                     "modifiers": match.group(1) or "",
+                    "javadoc": self._javadoc_above(lines, i),
                     "signature": stripped,
                     "start_line": i + 1,
                     "body": []
@@ -1973,9 +1987,63 @@ class MavenDecoderServer:
                     
                     if len(methods) >= max_methods:
                         break
-        
+
         return methods
-    
+
+    def _javadoc_above(self, lines: List[str], decl_index: int) -> Optional[str]:
+        """Return the Javadoc block ending immediately above a declaration.
+
+        Only ``/** ... */`` blocks count; ``//`` and ``/* */`` comments are
+        ignored. Blank lines and annotation lines are allowed between the block
+        and the declaration. The comment markers (opening ``/**``, closing
+        ``*/`` and each line's leading ``*``) are stripped; the remaining text
+        is returned as-is. Returns None when there is no doc comment.
+        """
+        # Walk up past blank and annotation lines to the line that would end
+        # the doc block.
+        j = decl_index - 1
+        while j >= 0:
+            s = lines[j].strip()
+            if s == "" or s.startswith("@"):
+                j -= 1
+                continue
+            break
+
+        if j < 0 or not lines[j].strip().endswith("*/"):
+            return None
+
+        end = j
+        start = None
+        k = end
+        while k >= 0:
+            s = lines[k].strip()
+            if "/**" in s:
+                start = k
+                break
+            # Interior lines of a Javadoc block are conventionally "*"-led;
+            # anything else means this is not a contiguous /** */ block.
+            if k != end and not s.startswith("*"):
+                break
+            k -= 1
+
+        if start is None:
+            return None
+
+        cleaned = []
+        for raw in lines[start:end + 1]:
+            s = raw.strip()
+            if s.startswith("/**"):
+                s = s[3:]
+            if s.endswith("*/"):
+                s = s[:-2]
+            s = s.strip()
+            if s.startswith("*"):
+                s = s[1:].strip()
+            cleaned.append(s)
+
+        text = "\n".join(cleaned).strip()
+        return text or None
+
     async def _extract_source_code_internal(self, jar_path: Path, class_name: str) -> Optional[str]:
         """Internal method to extract source code without response formatting"""
         try:
