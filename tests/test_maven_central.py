@@ -409,8 +409,35 @@ class TestConfigRemoteSettings:
             assert Config.resolve_download_cache() == (tmp_path / "c").resolve()
 
     def test_invalid_timeout_falls_back_to_default(self):
-        with patch.dict(os.environ, {"MAVEN_HTTP_TIMEOUT": "not-a-number"}):
-            assert Config.http_timeout() == Config.DEFAULT_HTTP_TIMEOUT
+        for value in ("not-a-number", "   "):
+            with patch.dict(os.environ, {"MAVEN_HTTP_TIMEOUT": value}):
+                assert Config.http_timeout() == Config.DEFAULT_HTTP_TIMEOUT
+
+    def test_valid_timeout(self):
+        with patch.dict(os.environ, {"MAVEN_HTTP_TIMEOUT": "15"}):
+            assert Config.http_timeout() == 15.0
+
+    def test_http_retries_defaults_when_unset(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("MAVEN_HTTP_RETRIES", None)
+            assert Config.http_retries() == Config.DEFAULT_HTTP_RETRIES
+
+    def test_http_retries_invalid_or_empty_falls_back_to_default(self):
+        for value in ("not-a-number", "", "   "):
+            with patch.dict(os.environ, {"MAVEN_HTTP_RETRIES": value}):
+                assert Config.http_retries() == Config.DEFAULT_HTTP_RETRIES
+
+    def test_http_retries_valid_value(self):
+        with patch.dict(os.environ, {"MAVEN_HTTP_RETRIES": "5"}):
+            assert Config.http_retries() == 5
+
+    def test_http_retries_negative_clamps_to_zero(self):
+        with patch.dict(os.environ, {"MAVEN_HTTP_RETRIES": "-1"}):
+            assert Config.http_retries() == 0
+
+    def test_http_retries_zero(self):
+        with patch.dict(os.environ, {"MAVEN_HTTP_RETRIES": "0"}):
+            assert Config.http_retries() == 0
 
     def test_credentials_only_when_username_present(self):
         with patch.dict(os.environ, {"MAVEN_REMOTE_USERNAME": "u", "MAVEN_REMOTE_PASSWORD": "p"}):
