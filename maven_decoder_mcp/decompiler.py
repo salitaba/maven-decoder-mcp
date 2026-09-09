@@ -295,6 +295,65 @@ class JavaDecompiler:
     ACC_ABSTRACT = 0x0400
     ACC_SYNTHETIC = 0x1000
 
+    @staticmethod
+    def _class_internal_name(
+        class_data: bytes,
+        class_cp_index: int,
+    ) -> Optional[str]:
+        """Resolve a CONSTANT_Class constant-pool index to its internal name.
+
+        ``super_class`` is 0 for ``java.lang.Object`` and for interfaces, so
+        callers pass that value through and treat ``None`` as "no usable
+        supertype". The constant pool is walked independently of
+        ``_parse_constant_pool`` so this helper does not have to change its
+        return shape.
+        """
+        if (
+            not class_cp_index
+            or len(class_data) < 10
+            or class_data[:4] != b"\xca\xfe\xba\xbe"
+        ):
+            return None
+        try:
+            count = int.from_bytes(class_data[8:10], "big")
+            offset = 10
+            utf8: Dict[int, str] = {}
+            class_to_name: Dict[int, int] = {}
+            index = 1
+            while index < count:
+                if offset >= len(class_data):
+                    return None
+                tag = class_data[offset]
+                offset += 1
+                if tag == 1:  # CONSTANT_Utf8
+                    length = int.from_bytes(class_data[offset:offset + 2], "big")
+                    offset += 2
+                    raw = class_data[offset:offset + length]
+                    offset += length
+                    utf8[index] = raw.decode("utf-8", errors="replace")
+                elif tag == 7:  # CONSTANT_Class -> name_index
+                    name_index = int.from_bytes(class_data[offset:offset + 2], "big")
+                    offset += 2
+                    class_to_name[index] = name_index
+                elif tag in (8, 16, 19, 20):
+                    offset += 2
+                elif tag in (15,):
+                    offset += 3
+                elif tag in (3, 4, 9, 10, 11, 12, 17, 18):
+                    offset += 4
+                elif tag in (5, 6):
+                    offset += 8
+                    index += 1
+                else:
+                    return None
+                index += 1
+            name_index = class_to_name.get(class_cp_index)
+            if name_index is None:
+                return None
+            return utf8.get(name_index)
+        except Exception:
+            return None
+
     @classmethod
     def read_class_api(cls, class_data: bytes) -> Optional[Dict[str, Any]]:
         """Extract the public API surface of a class file.
@@ -323,7 +382,9 @@ class JavaDecompiler:
                 return None
 
             access_flags = u2(offset)
-            offset += 6                      # skip this_class, super_class
+            this_class_cp = u2(offset + 2)
+            super_class_cp = u2(offset + 4)
+            offset += 6
             interfaces_count = u2(offset)
             offset += 2 + interfaces_count * 2
 
@@ -387,6 +448,13 @@ class JavaDecompiler:
                 return None
             methods, _ = methods_result
 
+            this_class_internal = cls._class_internal_name(class_data, this_class_cp)
+            super_class_internal = (
+                cls._class_internal_name(class_data, super_class_cp)
+                if super_class_cp
+                else None
+            )
+
             return {
                 "access_flags": access_flags,
                 "public": bool(access_flags & cls.ACC_PUBLIC),
@@ -395,6 +463,8 @@ class JavaDecompiler:
                 "final": bool(access_flags & cls.ACC_FINAL),
                 "fields": fields,
                 "methods": methods,
+                "this_class_internal": this_class_internal,
+                "super_class_internal": super_class_internal,
             }
 
         except Exception:
