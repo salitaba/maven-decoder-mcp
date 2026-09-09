@@ -951,6 +951,48 @@ class TestAnnotationSearch:
         assert "Plain" not in names
 
 
+class TestSearchCaseSensitivity:
+    """search_classes matches case-sensitively by default; case_sensitive=False opts out."""
+
+    @pytest.fixture(autouse=True)
+    def isolated_repo(self, tmp_path):
+        """Scan only fixture jars, never the developer's real ~/.m2."""
+        self.server = MavenDecoderServer(maven_repository=tmp_path / "m2")
+        self.server.cache_home = tmp_path / "cache"
+        self.server.cache_home.mkdir(parents=True, exist_ok=True)
+
+    def _write_fixture_jar(self):
+        jar_path = self.server.cache_home / "com/example/util/1.0.0/util-1.0.0.jar"
+        jar_path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(jar_path, "w") as jar:
+            jar.writestr("com/example/util/ArrayList.class", b"class bytes")
+
+    async def _simple_names(self, **kwargs):
+        result = await self.server._search_classes(limit=10, **kwargs)
+        return [m["simple_name"] for m in json.loads(result[0].text)["matches"]]
+
+    @pytest.mark.asyncio
+    async def test_class_name_is_case_sensitive_by_default(self):
+        self._write_fixture_jar()
+        assert await self._simple_names(class_name="arraylist") == []
+        assert "ArrayList" in await self._simple_names(class_name="ArrayList")
+
+    @pytest.mark.asyncio
+    async def test_class_name_case_insensitive_when_opted_in(self):
+        self._write_fixture_jar()
+        names = await self._simple_names(class_name="arraylist", case_sensitive=False)
+        assert "ArrayList" in names
+
+    @pytest.mark.asyncio
+    async def test_package_pattern_honors_the_same_flag(self):
+        self._write_fixture_jar()
+        assert await self._simple_names(package_pattern="COM.EXAMPLE") == []
+        names = await self._simple_names(
+            package_pattern="COM.EXAMPLE", case_sensitive=False
+        )
+        assert "ArrayList" in names
+
+
 class TestUsageExamples:
     """find_usage_examples must return real callers, not a stub."""
 
