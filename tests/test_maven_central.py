@@ -409,6 +409,42 @@ class TestRetries:
 
         assert session.get.call_count == 2
 
+    def test_fallback_logs_warning_and_reports_answering_endpoint(
+        self, tmp_path, caplog
+    ):
+        client = MavenCentralClient(
+            search_urls=[
+                "https://broken.example/select",
+                "https://good.example/select",
+            ],
+            cache_dir=tmp_path / "cache",
+            offline=False,
+            retries=0,
+        )
+        payload = {
+            "response": {"numFound": 1, "docs": [{"g": "g", "a": "a", "v": "1"}]}
+        }
+
+        def fake_get(url, params=None, stream=False):
+            if url.endswith("maven-metadata.xml"):
+                raise MavenRemoteError(f"Request to {url} failed: no metadata")
+            if url.startswith("https://broken.example/"):
+                return make_response(status_code=503)
+            return make_response(json_body=payload)
+
+        with caplog.at_level("WARNING", logger="maven_decoder_mcp.maven_central"):
+            with patch.object(client, "_get", side_effect=fake_get):
+                result = client.get_versions("g", "a")
+
+        assert result["source"] == "search-index"
+        assert result["repository"] == "https://good.example/select"
+        messages = [record.getMessage() for record in caplog.records]
+        assert any(
+            "https://broken.example/select" in message
+            and "https://good.example/select" in message
+            for message in messages
+        )
+
 
 class TestConfigRemoteSettings:
     """Environment-driven remote configuration."""

@@ -119,8 +119,14 @@ class MavenCentralClient:
                 last_error = exc
                 if attempt < self.retries:
                     delay = 1.5 * (2 ** attempt)
-                    logger.debug(
-                        "Request to %s failed (%s); retrying in %.1fs", url, exc, delay
+                    logger.info(
+                        "Request to %s failed (%s); retrying in %.1fs "
+                        "(attempt %d of %d)",
+                        url,
+                        exc,
+                        delay,
+                        attempt + 1,
+                        self.retries + 1,
                     )
                     time.sleep(delay)
 
@@ -197,11 +203,16 @@ class MavenCentralClient:
             params["core"] = "gav"
 
         errors: List[str] = []
-        for search_url in self.search_urls:
+        for index, search_url in enumerate(self.search_urls):
             try:
                 payload = self._query_index(search_url, params)
             except MavenRemoteError as exc:
                 errors.append(str(exc))
+                if index + 1 < len(self.search_urls):
+                    logger.warning(
+                        "Search failed against %s (%s); trying %s next",
+                        search_url, exc, self.search_urls[index + 1],
+                    )
                 continue
 
             body = payload.get("response", {}) or {}
@@ -302,7 +313,7 @@ class MavenCentralClient:
         return {
             "artifact": f"{group_id}:{artifact_id}",
             "source": "search-index",
-            "repository": self.search_url,
+            "repository": search_result["search_url"],
             "latest": versions[0] if versions else None,
             "total_versions": search_result["total_found"],
             "versions": versions,
