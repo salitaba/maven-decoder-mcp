@@ -1590,6 +1590,8 @@ class MavenDecoderServer:
                 # repositories hold very few, so other jars are still scanned
                 # and simply ranked lower.
                 is_test_jar = 'test' in jar_path.name.lower()
+                if is_test_jar and not search_tests:
+                    continue
 
                 try:
                     with zipfile.ZipFile(jar_path, 'r') as jar:

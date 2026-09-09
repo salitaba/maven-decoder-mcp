@@ -1088,6 +1088,61 @@ class TestUsageExamples:
         jar_path.parent.mkdir(parents=True, exist_ok=True)
         return jar_path
 
+    @pytest.fixture
+    def caller_jars(self, monkeypatch):
+        test_jar = self._make_jar("lib-1.0.0-tests.jar")
+        main_jar = self._make_jar()
+        for jar_path, caller in (
+            (test_jar, "TestCaller"),
+            (main_jar, "MainCaller"),
+        ):
+            with zipfile.ZipFile(jar_path, "w") as jar:
+                jar.writestr(
+                    f"com/example/{caller}.class",
+                    make_class_bytes(["com/example/Target", "doWork"]),
+                )
+
+        # Make the test jar come first so limits cannot hide a missing filter.
+        monkeypatch.setattr(
+            self.server, "_iter_local_jars", lambda: iter([test_jar, main_jar])
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("search_tests", [None, True, False])
+    async def test_search_tests_controls_test_jar_inclusion(
+        self, caller_jars, search_tests
+    ):
+        options = {} if search_tests is None else {"search_tests": search_tests}
+        result = await self.server._find_usage_examples(
+            class_name="com.example.Target", method_name="doWork", **options
+        )
+        data = json.loads(result[0].text)
+
+        expected = [("com.example.MainCaller", False)]
+        if search_tests is not False:
+            expected.insert(0, ("com.example.TestCaller", True))
+        assert [
+            (match["using_class"], match["is_test_jar"]) for match in data["matches"]
+        ] == expected
+        assert data["total_matches"] == len(expected)
+        assert data["classes_scanned"] == len(expected)
+
+    @pytest.mark.asyncio
+    async def test_excluded_test_jars_do_not_consume_limits(
+        self, caller_jars, monkeypatch
+    ):
+        monkeypatch.setenv("MCP_USAGE_SCAN_LIMIT", "1")
+        result = await self.server._find_usage_examples(
+            class_name="com.example.Target", search_tests=False, limit=1
+        )
+        data = json.loads(result[0].text)
+
+        assert [match["using_class"] for match in data["matches"]] == [
+            "com.example.MainCaller"
+        ]
+        assert data["classes_scanned"] == 1
+        assert data["total_matches"] == 1
+
     @pytest.mark.asyncio
     async def test_finds_class_that_references_target(self):
         jar_path = self._make_jar()
