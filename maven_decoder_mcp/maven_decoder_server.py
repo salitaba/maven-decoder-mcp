@@ -814,6 +814,8 @@ class MavenDecoderServer:
             
             return [TextContent(type="text", text=json.dumps(analysis, indent=2))]
             
+        except zipfile.BadZipFile:
+            return [TextContent(type="text", text=self._corrupt_jar_message(jar_path))]
         except Exception as e:
             return [TextContent(type="text", text=f"Error analyzing jar: {str(e)}")]
     
@@ -940,6 +942,14 @@ class MavenDecoderServer:
             "search_maven_central to confirm the coordinates."
         )
     
+    @staticmethod
+    def _corrupt_jar_message(jar_path: Path) -> str:
+        """Explain how to recover from a corrupt or truncated jar."""
+        return (
+            f"Jar file is likely truncated or corrupt: {jar_path}. Delete it and "
+            "re-download the artifact, or re-run the Maven build that produced it."
+        )
+
     def _extract_packages(self, classes: List[str]) -> Dict[str, int]:
         """Extract package information from class list"""
         packages = {}
@@ -1144,8 +1154,9 @@ class MavenDecoderServer:
                             matches.append(match_info)
                             count += 1
                 
-                except Exception:
-                    continue  # Skip corrupted jars
+                except zipfile.BadZipFile:
+                    logger.warning("Skipping corrupt or truncated jar: %s", jar_path)
+                    continue
             
             result = {
                 "total_matches": len(matches),
@@ -1844,12 +1855,19 @@ class MavenDecoderServer:
             return [TextContent(type="text", text=self._jar_not_found_message(group_id, artifact_id, version))]
         
         try:
+            # JavaDecompiler currently turns archive errors into a generic result,
+            # so validate here to keep the tool-facing error actionable.
+            if jar_path.is_file():
+                with zipfile.ZipFile(jar_path, "r"):
+                    pass
             analysis = self.decompiler.analyze_jar_structure(jar_path)
             analysis["origin"] = self._path_origin(jar_path)
             if summarize_large_content and self.response_manager.should_summarize(json.dumps(analysis, indent=2)):
                 analysis["content"] = self.response_manager.summarize_large_text(json.dumps(analysis, indent=2))
                 analysis["summarized"] = True
             return [TextContent(type="text", text=json.dumps(analysis, indent=2))]
+        except zipfile.BadZipFile:
+            return [TextContent(type="text", text=self._corrupt_jar_message(jar_path))]
         except Exception as e:
             return [TextContent(type="text", text=f"Error analyzing jar structure: {str(e)}")]
     
@@ -1862,6 +1880,10 @@ class MavenDecoderServer:
             return [TextContent(type="text", text=self._jar_not_found_message(group_id, artifact_id, version))]
         
         try:
+            # Fail before the decompiler's generic fallback hides BadZipFile.
+            if jar_path.is_file():
+                with zipfile.ZipFile(jar_path, "r"):
+                    pass
             # Get the full source code first
             source_code = await self._extract_source_code_internal(jar_path, class_name)
             if not source_code:
@@ -1880,6 +1902,8 @@ class MavenDecoderServer:
             
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
+        except zipfile.BadZipFile:
+            return [TextContent(type="text", text=self._corrupt_jar_message(jar_path))]
         except Exception as e:
             return [TextContent(type="text", text=f"Error extracting method info: {str(e)}")]
     
