@@ -4,6 +4,8 @@
 import os
 from pathlib import Path
 from unittest.mock import patch
+import pytest
+
 
 from maven_decoder_mcp.config import Config
 from maven_decoder_mcp.maven_decoder_server import MavenDecoderServer
@@ -93,3 +95,18 @@ class TestResolveMavenRepository:
             mock_home.return_value = Path("/mock/home")
             server = MavenDecoderServer(maven_repository=str(repo))
         assert server.maven_home == repo.resolve()
+        
+    @pytest.mark.asyncio
+    async def test_list_artifacts_missing_repo_explains_without_raising(self, tmp_path):
+        missing_repo = tmp_path / "nonexistent" / "repository"
+        server = MavenDecoderServer(maven_repository=missing_repo)
+
+        result = await server._list_artifacts()
+        assert len(result) == 1
+        assert result[0].type == "text"
+        text = result[0].text
+
+        # Asserts required by issue #12
+        assert str(missing_repo) in text
+        assert "MAVEN_REPOSITORY" in text
+        assert "FileNotFoundError" not in text
