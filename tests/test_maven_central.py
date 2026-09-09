@@ -12,7 +12,7 @@ import os
 import re
 import zipfile
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import requests
@@ -1244,6 +1244,92 @@ class TestServerRemoteIntegration:
     async def test_version_info_stays_local_by_default(self):
         result = await self.server._get_version_info("com.example", "demo")
         assert "remote" not in json.loads(result[0].text)
+
+
+class TestMethodInfoJavadoc:
+    """extract_method_info attaches Javadoc and prefers sources-jar text."""
+
+    DOCUMENTED_SOURCE = """package com.example;
+
+public class Lib {
+    /**
+     * Adds two numbers.
+     *
+     * @param a the first addend
+     */
+    public int add(int a, int b) {
+        return a + b;
+    }
+
+    public int sub(int a, int b) {
+        return a - b;
+    }
+}
+"""
+
+    def _server(self, tmp_path):
+        return MavenDecoderServer(maven_repository=tmp_path / "m2")
+
+    def _valid_main_jar(self, tmp_path):
+        main_jar = tmp_path / "lib-1.0.0.jar"
+        with zipfile.ZipFile(main_jar, "w") as jar:
+            jar.writestr("com/example/Lib.class", b"\xca\xfe\xba\xbe")
+        return main_jar
+
+    @pytest.mark.asyncio
+    async def test_javadoc_from_sources_jar(self, tmp_path):
+        server = self._server(tmp_path)
+        main_jar = self._valid_main_jar(tmp_path)
+        sources_jar = tmp_path / "lib-1.0.0-sources.jar"
+        with zipfile.ZipFile(sources_jar, "w") as jar:
+            jar.writestr("com/example/Lib.java", self.DOCUMENTED_SOURCE)
+
+        with patch.object(server, "_resolve_jar_path", AsyncMock(return_value=main_jar)), \
+             patch.object(
+                 server, "_resolve_sources_jar_path", AsyncMock(return_value=sources_jar)
+             ):
+            result = await server._extract_method_info(
+                "com.example", "lib", "1.0.0", "com.example.Lib"
+            )
+
+        data = json.loads(result[0].text)
+        assert data["source"] == "sources-jar"
+        methods = {m["name"]: m for m in data["methods"]}
+        assert "Adds two numbers." in methods["add"]["javadoc"]
+        assert "@param a the first addend" in methods["add"]["javadoc"]
+        # Markers are stripped.
+        assert "/**" not in methods["add"]["javadoc"]
+        assert "*/" not in methods["add"]["javadoc"]
+        # Undocumented method still carries the key, set to None.
+        assert methods["sub"]["javadoc"] is None
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_decompiled_when_no_sources_jar(self, tmp_path):
+        server = self._server(tmp_path)
+        main_jar = self._valid_main_jar(tmp_path)
+        decompiled = (
+            "public class Lib {\n"
+            "    public int add(int a, int b) {\n"
+            "        return a + b;\n"
+            "    }\n"
+            "}\n"
+        )
+
+        with patch.object(server, "_resolve_jar_path", AsyncMock(return_value=main_jar)), \
+             patch.object(
+                 server, "_resolve_sources_jar_path", AsyncMock(return_value=None)
+             ), \
+             patch.object(
+                 server, "_extract_source_code_internal", AsyncMock(return_value=decompiled)
+             ):
+            result = await server._extract_method_info(
+                "com.example", "lib", "1.0.0", "com.example.Lib"
+            )
+
+        data = json.loads(result[0].text)
+        assert data["source"] == "decompiled"
+        methods = {m["name"]: m for m in data["methods"]}
+        assert methods["add"]["javadoc"] is None
 
 
 if __name__ == "__main__":
