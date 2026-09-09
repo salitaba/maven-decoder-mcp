@@ -1,19 +1,27 @@
-# Maven Decoder MCP Server v1.3.1
+# Maven Decoder MCP Server v1.3.2
+
+A packaging and documentation release. No runtime behavior changes — the
+server's tools and their outputs are identical to v1.3.1.
 
 ## What's Changed
 
 ### Fixes
-- Install from PyPI without git URL: `bin/maven-decoder-mcp.js`, `install.sh`, and `scripts/install.js` now run plain `pip install maven-decoder-mcp` (SDK comes from PyPI)
-- Fix Docker image name to `ali79taba/maven-decoder-mcp` in `install.sh`
-- `simple_release.sh`: use `python -m build` and generic `maven-decoder-mcp-*.tgz` instead of hardcoded v1.0.0 paths
-- `DISTRIBUTION.md`: generic `<version>` placeholders instead of stale 1.0.0 filenames
+- A clean `pip install -e ".[dev]"` could not run the test suite. `pytest.ini`
+  passes `--cov`, but `pytest-cov` was missing from the `dev` extra, so
+  `pytest` failed on a fresh checkout. It is now declared.
 
-### Maintenance
-- Release workflow syncs all three version copies from tag (`pyproject.toml`, `package.json`, both `__init__.py`)
-- Release notes generated from git history via `scripts/generate_release_notes.py`; stale static template removed so notes describe this release
-- Add `RELEASING.md` checklist, rewrite `RELEASE_GUIDE.md` around tag-as-source-of-truth, add `skills/project-release/`
-- Docker publish gains SBOM + provenance attestations and explicit errors for missing `PYPI_API_TOKEN` / `DOCKER_*` secrets
-- Add `tests/test_release_notes.py` pinning generator, guard, and version-sync behavior
+### Packaging
+- Published to the [MCP Server Registry](https://github.com/modelcontextprotocol/registry).
+  Adds a root `server.json`, `mcpName` in `package.json`, and an `mcp-name`
+  marker in `README.md` so the registry can verify namespace ownership from
+  the published npm and PyPI artifacts.
+
+### Documentation
+- Rewritten README intro with a demo GIF showing a real `compare_versions`
+  run against `org.jsoup:jsoup` 1.17.2 → 1.23.2.
+- Added `CONTRIBUTING.md`.
+- `RELEASING.md` now documents that `server.json` is not rewritten from the
+  git tag by CI and must be bumped by hand.
 
 ## Installation
 
@@ -31,8 +39,8 @@ npm install -g maven-decoder-mcp
 ```bash
 docker run --rm -it \
   -v ~/.m2:/home/mcpuser/.m2 \
-  ali79taba/maven-decoder-mcp:1.3.1
+  ali79taba/maven-decoder-mcp:1.3.2
 ```
 
 
-**Full Changelog**: https://github.com/salitaba/maven-decoder-mcp/compare/v1.3.0...v1.3.1
+**Full Changelog**: https://github.com/salitaba/maven-decoder-mcp/compare/v1.3.1...v1.3.2
