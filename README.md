@@ -134,6 +134,40 @@ pip install "git+https://github.com/modelcontextprotocol/python-sdk.git"
 ./setup_decompilers.sh
 ```
 
+### Windows
+
+For a source checkout, use Python 3.10 or newer and a JDK on `PATH`. From the
+repository root, create and activate a virtual environment in PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+
+# Point to your existing local Maven repository (drive-letter paths are supported)
+$env:MAVEN_REPOSITORY = 'F:\data\repository'
+maven-decoder-mcp
+```
+
+In Command Prompt (`cmd.exe`), activate with `.venv\Scripts\activate.bat` and set
+the repository with `set "MAVEN_REPOSITORY=F:\data\repository"` instead. These
+environment settings apply to programs launched from that terminal; set them in
+your MCP client's environment when it launches the server separately.
+
+Remote downloads use a separate cache, resolved in this order (empty values are
+skipped):
+
+1. `MAVEN_DECODER_CACHE_DIR`: the complete cache directory; no subdirectory is appended.
+2. `XDG_CACHE_HOME`: append `maven-decoder-mcp\repository`.
+3. `LOCALAPPDATA`: append `maven-decoder-mcp\repository`.
+4. Otherwise, `~/.cache/maven-decoder-mcp/repository` under your home directory.
+
+On Windows, this usually means `%LOCALAPPDATA%\maven-decoder-mcp\repository`;
+`XDG_CACHE_HOME` still takes precedence if set. The cache uses Maven's directory
+layout but stays separate from the real local repository so downloads do not
+interfere with Maven builds. Setting `MAVEN_REPOSITORY` does not change the cache
+location.
+
 ## 🔧 Configuration
 
 ### For Cursor IDE
