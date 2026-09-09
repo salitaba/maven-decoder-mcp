@@ -2,7 +2,39 @@
 
 [![skills.sh](https://skills.sh/b/salitaba/maven-decoder-mcp)](https://skills.sh/salitaba/maven-decoder-mcp)
 
-A comprehensive Model Context Protocol (MCP) server for analyzing Maven jar files, both in your local repository (`~/.m2`) and **online on Maven Central**. This server provides powerful tools for agentic coding assistance in Java projects, enabling AI agents to understand dependencies, analyze bytecode, extract source code, and navigate the Maven ecosystem.
+**Your agent guesses at library APIs it has never read. This makes it read them.**
+
+Lets AI agents read the actual source of any Maven dependency — decompiles jars from
+`~/.m2` or Maven Central, and diffs versions for breaking changes.
+
+![Demo: comparing jsoup 1.17.2 with 1.23.2](docs/demo.gif)
+
+Ask an agent *"I'm upgrading `org.jsoup:jsoup` from 1.17.2 to 1.23.2 — what breaks?"* and
+without a way to read the jars it will answer from memory. With this server,
+`compare_versions` reads both jars and reports what actually changed:
+
+| | 1.17.2 → 1.23.2 |
+|---|---|
+| Breaking changes | **45** |
+| Members removed | 31 |
+| Members added | 150 |
+| Classes with API changes | 47 of 115 compared |
+
+Members are compared **as declared**, so one that moved to a supertype is reported as
+removed even though it may still be callable. The tool states this in its own output.
+
+It works on artifacts that have **no sources jar** too: `extract_class_info` falls back
+to `javap` and returns parsed fields, methods, and bytecode version — which is exactly
+the case for the internal artifacts in a corporate Nexus.
+
+### Try it in one command
+
+```bash
+npx skills add https://github.com/salitaba/maven-decoder-mcp --skill maven-code-search
+```
+
+That installs the `maven-code-search` agent skill, which tells your agent when to reach
+for these tools. For a raw MCP server setup instead, see [Installation](#-installation).
 
 ## 🚀 Features
 
