@@ -65,4 +65,25 @@ async def test_search_skips_corrupt_jar_and_keeps_valid_results(server, caplog):
 
     payload = json.loads(result[0].text)
     assert [match["class_name"] for match in payload["matches"]] == ["com.example.Good"]
-    assert any(str(bad_jar) in record.message for record in caplog.records)
+    # record.message is only populated after a record is formatted; getMessage()
+    # renders the message with its args and is the robust way to assert on it.
+    assert any(str(bad_jar) in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_search_surfaces_unexpected_error(server, monkeypatch):
+    """An unexpected error during a scan must propagate, not be swallowed.
+
+    Only zipfile.BadZipFile is an expected, per-jar condition. Any other
+    failure (e.g. an OSError while walking the repository) should surface so it
+    is distinguishable from an ordinary empty result rather than being flattened
+    into a generic "Error searching classes" text response. See issue #21.
+    """
+
+    def boom():
+        raise OSError("permission denied on repository root")
+
+    monkeypatch.setattr(server, "_iter_local_jars", boom)
+
+    with pytest.raises(OSError, match="permission denied"):
+        await server._search_classes(class_name="Anything")
