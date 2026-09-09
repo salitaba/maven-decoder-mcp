@@ -225,6 +225,40 @@ class TestGetVersions:
 
 class TestDownload:
     """Downloading, caching, checksum verification and size limits."""
+    
+    def test_declared_size_rejection_names_env_var(self, tmp_path):
+        client = MavenCentralClient(
+            cache_dir=tmp_path / "cache",
+            offline=False,
+            retries=0,
+            max_download_bytes=10,
+        )
+        response = make_response(content=b"x" * 100, headers={"Content-Length": "100"})
+
+        with patch.object(client, "_get", return_value=response):
+            with pytest.raises(MavenRemoteError, match="MAVEN_MAX_DOWNLOAD_SIZE"):
+                client.download_artifact("com.example", "big", "1.0.0")
+
+    def test_streamed_size_rejection_and_cleanup(self, tmp_path):
+        cache_dir = tmp_path / "cache"
+        client = MavenCentralClient(
+            cache_dir=cache_dir,
+            offline=False,
+            retries=0,
+            max_download_bytes=10,
+        )
+        # Mock response with NO Content-Length header that streams more than the limit
+        response = make_response(content=b"x" * 50, headers={})
+
+        with patch.object(client, "_get", return_value=response):
+            with pytest.raises(MavenRemoteError, match="MAVEN_MAX_DOWNLOAD_SIZE"):
+                client.download_artifact("com.example", "big", "1.0.0")
+
+        # Verify no completed file exists and no .part temporary files remain
+        target = client.cached_path("com.example", "big", "1.0.0")
+        assert not target.exists()
+        part_files = list(cache_dir.rglob("*.part"))
+        assert part_files == []
 
     def test_downloads_into_maven_layout(self, client):
         payload = b"jar-bytes"
@@ -378,6 +412,20 @@ class TestRetries:
 
 class TestConfigRemoteSettings:
     """Environment-driven remote configuration."""
+    def test_max_download_size_defaults_when_unset(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("MAVEN_MAX_DOWNLOAD_SIZE", None)
+            assert Config.max_download_bytes() == Config.MAX_JAR_SIZE
+
+    def test_max_download_size_invalid_or_non_positive_falls_back_to_default(self):
+        for value in ("not-a-number", "", "   ", "0", "-1", "-100"):
+            with patch.dict(os.environ, {"MAVEN_MAX_DOWNLOAD_SIZE": value}):
+                assert Config.max_download_bytes() == Config.MAX_JAR_SIZE
+
+    def test_max_download_size_valid_positive_value(self):
+        with patch.dict(os.environ, {"MAVEN_MAX_DOWNLOAD_SIZE": "52428800"}):
+            assert Config.max_download_bytes() == 52428800
+    
 
     def test_offline_flag_accepts_common_spellings(self):
         for value in ("true", "1", "yes", "on"):
