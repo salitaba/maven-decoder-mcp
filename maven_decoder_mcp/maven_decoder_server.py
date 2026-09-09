@@ -1437,6 +1437,7 @@ class MavenDecoderServer:
         return f"{name}{descriptor}"
 
     def _member_inherited_in_jar(self, z2: zipfile.ZipFile,
+                                 entries2: set,
                                  api2: Dict[str, Any],
                                  member_name: str,
                                  member_descriptor: str) -> bool:
@@ -1445,6 +1446,8 @@ class MavenDecoderServer:
 
         Walks the supertype chain through ``api2["super_class_internal"]``
         using ``read_class_api`` on each supertype's classfile from ``z2``.
+        ``entries2`` is the jar's entry names as a set, built once by the
+        caller so the chain walk does not rebuild ``namelist()`` per hop.
         Cycles are bounded by a visited set; supertypes that are not
         inside ``z2`` stop the walk (issue #10: scope is same jar only).
         """
@@ -1453,7 +1456,7 @@ class MavenDecoderServer:
         while current and current not in visited:
             visited.add(current)
             entry = current.replace(".", "/") + ".class"
-            if entry not in z2.namelist():
+            if entry not in entries2:
                 return False
             data = z2.read(entry)
             super_api = self.decompiler.read_class_api(data)
@@ -1476,6 +1479,10 @@ class MavenDecoderServer:
         reads as one removal and one addition rather than a false "same".
         """
         api_limit = int(os.getenv('MCP_API_DIFF_LIMIT', '2000'))
+
+        # Built once: the supertype walk below is per class, per member, and
+        # namelist() rebuilds a list on every call.
+        entries2 = set(z2.namelist()) if resolve_inherited else set()
 
         removed_members = []
         added_members = []
@@ -1541,7 +1548,8 @@ class MavenDecoderServer:
                     for signature in gone:
                         member = old[signature]
                         if self._member_inherited_in_jar(
-                            z2, api2, member["name"], member["descriptor"]
+                            z2, entries2, api2,
+                            member["name"], member["descriptor"]
                         ):
                             moved.append(signature)
                         else:
