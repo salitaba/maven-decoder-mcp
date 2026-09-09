@@ -1187,9 +1187,17 @@ class MavenDecoderServer:
             
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
-        except Exception as e:
-            return [TextContent(type="text", text=f"Error searching classes: {str(e)}")]
-    
+        except Exception:
+            # Only zipfile.BadZipFile is an expected, per-jar condition and is
+            # handled inside the scan loop above. Anything reaching here is
+            # unexpected (a permissions error on the repository root, an OSError
+            # mid-walk, a decode bug, ...) and must not be flattened into an
+            # ordinary text response, where it is indistinguishable from an
+            # empty result. Log it with a traceback and re-raise so the tool
+            # handler surfaces it as a clear error. See issue #21.
+            logger.error("Unexpected error while searching classes", exc_info=True)
+            raise
+
     def _extract_artifact_info_from_path(self, jar_path: Path) -> Dict[str, str]:
         """Extract Maven artifact info from jar path"""
         try:
