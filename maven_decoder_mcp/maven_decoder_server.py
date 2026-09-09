@@ -475,6 +475,7 @@ class MavenDecoderServer:
                             "version1": {"type": "string", "description": "First (older) version to compare"},
                             "version2": {"type": "string", "description": "Second (newer) version to compare"},
                             "compare_api": {"type": "boolean", "default": True, "description": "Diff the public API: added/removed public and protected methods and fields, and breaking changes"},
+                            "resolve_inherited": {"type": "boolean", "default": False, "description": "Reclassify members that disappeared from a class but are still declared on a supertype within the new jar into a 'moved to supertype' bucket instead of counting them as breaking removals. Defaults to false (byte-identical to the as-declared diff)."},
                             "summarize_large_content": {"type": "boolean", "default": True, "description": "Summarize large content automatically"}
                         },
                         "required": ["group_id", "artifact_id", "version1", "version2"],
@@ -1381,6 +1382,7 @@ class MavenDecoderServer:
     async def _compare_versions(self, group_id: str, artifact_id: str,
                               version1: str, version2: str,
                               compare_api: bool = True,
+                              resolve_inherited: bool = False,
                               summarize_large_content: bool = True) -> List[TextContent]:
         """Compare different versions of the same artifact"""
         # Get both jar paths, downloading either side when it is missing
@@ -1417,7 +1419,7 @@ class MavenDecoderServer:
 
                 if compare_api:
                     comparison["comparison"]["api_changes"] = self._compare_public_api(
-                        z1, z2, classes1, classes2
+                        z1, z2, classes1, classes2, resolve_inherited=resolve_inherited
                     )
             
             if summarize_large_content and self.response_manager.should_summarize(json.dumps(comparison, indent=2)):
@@ -1434,8 +1436,41 @@ class MavenDecoderServer:
         """Render a member as ``name descriptor`` for readable diffs."""
         return f"{name}{descriptor}"
 
+    def _member_inherited_in_jar(self, z2: zipfile.ZipFile,
+                                 entries2: set,
+                                 api2: Dict[str, Any],
+                                 member_name: str,
+                                 member_descriptor: str) -> bool:
+        """True if a supertype of ``api2``'s class, present in ``z2``,
+        declares a member with the given name and descriptor.
+
+        Walks the supertype chain through ``api2["super_class_internal"]``
+        using ``read_class_api`` on each supertype's classfile from ``z2``.
+        ``entries2`` is the jar's entry names as a set, built once by the
+        caller so the chain walk does not rebuild ``namelist()`` per hop.
+        Cycles are bounded by a visited set; supertypes that are not
+        inside ``z2`` stop the walk (issue #10: scope is same jar only).
+        """
+        visited: set = set()
+        current = api2.get("super_class_internal")
+        while current and current not in visited:
+            visited.add(current)
+            entry = current.replace(".", "/") + ".class"
+            if entry not in entries2:
+                return False
+            data = z2.read(entry)
+            super_api = self.decompiler.read_class_api(data)
+            if super_api is None:
+                return False
+            for m in super_api.get("methods", []) + super_api.get("fields", []):
+                if m["name"] == member_name and m["descriptor"] == member_descriptor:
+                    return True
+            current = super_api.get("super_class_internal")
+        return False
+
     def _compare_public_api(self, z1: zipfile.ZipFile, z2: zipfile.ZipFile,
-                            classes1: set, classes2: set) -> Dict[str, Any]:
+                            classes1: set, classes2: set,
+                            resolve_inherited: bool = False) -> Dict[str, Any]:
         """Diff the public API of two jars.
 
         Only classes present in both versions are compared member by member;
@@ -1445,8 +1480,13 @@ class MavenDecoderServer:
         """
         api_limit = int(os.getenv('MCP_API_DIFF_LIMIT', '2000'))
 
+        # Built once: the supertype walk below is per class, per member, and
+        # namelist() rebuilds a list on every call.
+        entries2 = set(z2.namelist()) if resolve_inherited else set()
+
         removed_members = []
         added_members = []
+        moved_members = []
         changed_classes = []
         unparseable = 0
         compared = 0
@@ -1501,11 +1541,29 @@ class MavenDecoderServer:
 
                 gone = sorted(set(old) - set(new))
                 fresh = sorted(set(new) - set(old))
+                moved: List[str] = []
+
+                if resolve_inherited and gone:
+                    still_gone: List[str] = []
+                    for signature in gone:
+                        member = old[signature]
+                        if self._member_inherited_in_jar(
+                            z2, entries2, api2,
+                            member["name"], member["descriptor"]
+                        ):
+                            moved.append(signature)
+                        else:
+                            still_gone.append(signature)
+                    gone = still_gone
 
                 if gone:
                     class_changes[f"{kind}_removed"] = gone
                     for signature in gone:
                         removed_members.append(f"{class_name}#{signature}")
+                if moved:
+                    class_changes[f"{kind}_moved_to_supertype"] = moved
+                    for signature in moved:
+                        moved_members.append(f"{class_name}#{signature}")
                 if fresh:
                     class_changes[f"{kind}_added"] = fresh
                     for signature in fresh:
@@ -1543,6 +1601,22 @@ class MavenDecoderServer:
                 "certain breakage."
             ),
         }
+
+        if resolve_inherited:
+            result["members_moved_to_supertype"] = len(moved_members)
+            result["summary"] = (
+                f"{len(added_members)} member(s) added, "
+                f"{len(removed_members)} removed, "
+                f"{len(moved_members)} moved to supertype across "
+                f"{len(changed_classes)} class(es); "
+                f"{len(classes2 - classes1)} class(es) added, "
+                f"{len(classes1 - classes2)} removed"
+            )
+            result["note"] = (
+                "Inherited members were resolved against the new jar: a "
+                "member listed as moved to a supertype is still callable on "
+                "the new version and is not counted as a breaking change."
+            )
 
         if unparseable:
             result["unparseable_classes"] = unparseable

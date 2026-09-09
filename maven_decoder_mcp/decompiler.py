@@ -205,12 +205,17 @@ class JavaDecompiler:
         return analysis
 
     @staticmethod
-    def _parse_constant_pool(class_data: bytes) -> Optional[Tuple[Dict[int, str], int]]:
-        """Walk the constant pool, returning ``(utf8_by_index, next_offset)``.
+    def _parse_constant_pool(
+        class_data: bytes,
+    ) -> Optional[Tuple[Dict[int, str], Dict[int, int], int]]:
+        """Walk the constant pool.
 
+        Returns ``(utf8_by_index, class_name_index_by_index, next_offset)``.
         Indices are preserved because field and method entries reference
-        their name and descriptor by pool index. Returns ``None`` when the
-        data is not a parseable class file.
+        their name and descriptor by pool index, and ``this_class`` /
+        ``super_class`` reference a ``CONSTANT_Class`` entry whose own
+        ``name_index`` points at the internal name. Returns ``None`` when
+        the data is not a parseable class file.
         """
         # magic(4) + minor(2) + major(2) + constant_pool_count(2)
         if len(class_data) < 10 or class_data[:4] != b'\xca\xfe\xba\xbe':
@@ -220,6 +225,7 @@ class JavaDecompiler:
             count = int.from_bytes(class_data[8:10], 'big')
             offset = 10
             utf8: Dict[int, str] = {}
+            class_name_index: Dict[int, int] = {}
 
             index = 1
             while index < count:
@@ -235,7 +241,12 @@ class JavaDecompiler:
                     raw = class_data[offset:offset + length]
                     offset += length
                     utf8[index] = raw.decode('utf-8', errors='replace')
-                elif tag in (7, 8, 16, 19, 20):      # 2-byte payload
+                elif tag == 7:                       # CONSTANT_Class -> name_index
+                    class_name_index[index] = int.from_bytes(
+                        class_data[offset:offset + 2], 'big'
+                    )
+                    offset += 2
+                elif tag in (8, 16, 19, 20):         # 2-byte payload
                     offset += 2
                 elif tag in (15,):                   # MethodHandle: 1 + 2
                     offset += 3
@@ -250,7 +261,7 @@ class JavaDecompiler:
 
                 index += 1
 
-            return utf8, offset
+            return utf8, class_name_index, offset
 
         except Exception:
             return None
@@ -312,7 +323,21 @@ class JavaDecompiler:
         if parsed is None:
             return None
 
-        utf8, offset = parsed
+        utf8, class_name_index, offset = parsed
+
+        def internal_name(class_cp_index: int) -> Optional[str]:
+            """Resolve a ``CONSTANT_Class`` pool index to its internal name.
+
+            ``super_class`` is 0 for ``java.lang.Object`` and for interfaces,
+            so callers pass that value through and read ``None`` as "no
+            usable supertype".
+            """
+            if not class_cp_index:
+                return None
+            name_index = class_name_index.get(class_cp_index)
+            if name_index is None:
+                return None
+            return utf8.get(name_index)
 
         try:
             def u2(pos: int) -> int:
@@ -323,7 +348,8 @@ class JavaDecompiler:
                 return None
 
             access_flags = u2(offset)
-            offset += 6                      # skip this_class, super_class
+            super_class_cp = u2(offset + 4)
+            offset += 6
             interfaces_count = u2(offset)
             offset += 2 + interfaces_count * 2
 
@@ -395,6 +421,7 @@ class JavaDecompiler:
                 "final": bool(access_flags & cls.ACC_FINAL),
                 "fields": fields,
                 "methods": methods,
+                "super_class_internal": internal_name(super_class_cp),
             }
 
         except Exception:

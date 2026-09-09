@@ -687,12 +687,16 @@ ACC_FINAL = 0x0010
 ACC_SYNTHETIC = 0x1000
 
 
-def make_api_class(fields=(), methods=(), class_flags=ACC_PUBLIC):
+def make_api_class(fields=(), methods=(), class_flags=ACC_PUBLIC,
+                     super_class_name=None):
     """Build a .class file with real field and method tables.
 
     Each member is ``(name, descriptor, access_flags)``. Only the structure
     read_class_api depends on is emitted, which is enough to exercise the
-    parser without pulling in a Java compiler.
+    parser without pulling in a Java compiler. When ``super_class_name`` is
+    given it is emitted as a CONSTANT_Utf8 plus a CONSTANT_Class entry and
+    the classfile's ``super_class`` index is pointed at it, so callers can
+    exercise supertype-aware diffs.
     """
     import struct
 
@@ -707,6 +711,16 @@ def make_api_class(fields=(), methods=(), class_flags=ACC_PUBLIC):
                 entries += bytes([1]) + struct.pack(">H", len(raw)) + raw
                 indices[text] = pool_index
                 pool_index += 1
+
+    super_class_index = 0
+    if super_class_name is not None:
+        raw = super_class_name.encode("utf-8")
+        entries += bytes([1]) + struct.pack(">H", len(raw)) + raw
+        name_cp_index = pool_index
+        pool_index += 1
+        entries += bytes([7]) + struct.pack(">H", name_cp_index)
+        super_class_index = pool_index
+        pool_index += 1
 
     def member_table(members):
         table = struct.pack(">H", len(members))
@@ -728,7 +742,7 @@ def make_api_class(fields=(), methods=(), class_flags=ACC_PUBLIC):
         + entries
         + struct.pack(">H", class_flags)   # access_flags
         + struct.pack(">H", 0)             # this_class
-        + struct.pack(">H", 0)             # super_class
+        + struct.pack(">H", super_class_index)  # super_class (0 when none)
         + struct.pack(">H", 0)             # interfaces_count
         + member_table(list(fields))
         + member_table(list(methods))
@@ -933,6 +947,46 @@ class TestApiComparison:
         assert isinstance(api, dict)
         assert api["members_removed"] == 1
         assert api["compatible"] is False
+
+    def test_resolve_inherited_reclassifies_moved_to_supertype(self, tmp_path):
+        """resolve_inherited=True must move a method to a moved bucket, not removed."""
+        old = self._jar(tmp_path, "old.jar", {
+            "com/example/Base.class": make_api_class(),
+            "com/example/Api.class": make_api_class(
+                methods=[("greet", "()V", ACC_PUBLIC)],
+                super_class_name="com/example/Base",
+            ),
+        })
+        new = self._jar(tmp_path, "new.jar", {
+            "com/example/Base.class": make_api_class(
+                methods=[("greet", "()V", ACC_PUBLIC)],
+            ),
+            "com/example/Api.class": make_api_class(
+                super_class_name="com/example/Base",
+            ),
+        })
+
+        with zipfile.ZipFile(old) as z1, zipfile.ZipFile(new) as z2:
+            entries = {"com/example/Base.class", "com/example/Api.class"}
+            default_result = self.server._compare_public_api(
+                z1, z2, entries, entries,
+            )
+            resolved_result = self.server._compare_public_api(
+                z1, z2, entries, entries, resolve_inherited=True,
+            )
+
+        # Default behaviour: the moved member is still reported as removed.
+        assert default_result["members_removed"] == 1
+        assert default_result["breaking_changes"] == 1
+        assert default_result["compatible"] is False
+        assert "as declared on each class" in default_result["note"]
+
+        # With resolve_inherited=True the same member is reclassified.
+        assert resolved_result["members_removed"] == 0
+        assert resolved_result["breaking_changes"] == 0
+        assert resolved_result["compatible"] is True
+        assert resolved_result["members_moved_to_supertype"] == 1
+        assert "inherited" in resolved_result["note"].lower()
 
 
 class TestConstantPoolParsing:
