@@ -11,7 +11,7 @@ import json
 import os
 import zipfile
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import logging
@@ -741,11 +741,13 @@ class MavenDecoderServer:
                                 "version": version_name,
                                 "jar_files": [f.name for f in jar_files],
                                 "size_bytes": size_bytes,
-                                "last_modified": datetime.fromtimestamp(mtime).isoformat(),
+                                "last_modified": datetime.fromtimestamp(
+                                    mtime, timezone.utc
+                                ).astimezone().isoformat(),
                                 "path": str(version_dir),
-                                # Sort key only; the ISO string above is for
-                                # display and is not ordered reliably across
-                                # differing UTC offsets. Removed before output.
+                                # Sort key only: comparing floats is cheaper and
+                                # exact, where the ISO string above is for
+                                # display. Removed before output.
                                 "_mtime": mtime,
                             })
 

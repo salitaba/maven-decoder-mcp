@@ -7,6 +7,7 @@ import pytest
 import json
 import os
 import zipfile
+from datetime import datetime
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
 
@@ -475,6 +476,24 @@ class TestListArtifactsSorting:
         self._build_repo(server)
         order, _ = await self._order(server, sort_by="bogus")
         assert order == ["alpha", "beta", "gamma"]
+
+    @pytest.mark.asyncio
+    async def test_limit_slices_after_sorting(self, server):
+        """The page is the top of the sorted set, not the first files scanned."""
+        self._build_repo(server)
+        order, payload = await self._order(server, sort_by="size", limit=1)
+        assert order == ["beta"]
+        # total_found reports every match, not just the returned page.
+        assert payload["total_found"] == 3
+
+    @pytest.mark.asyncio
+    async def test_last_modified_carries_utc_offset(self, server):
+        self._build_repo(server)
+        _, payload = await self._order(server)
+        stamp = payload["artifacts"][0]["last_modified"]
+        parsed = datetime.fromisoformat(stamp)
+        assert parsed.tzinfo is not None
+        assert parsed.timestamp() == pytest.approx(1_000)
 
 
 if __name__ == "__main__":
