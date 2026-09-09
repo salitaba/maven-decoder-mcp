@@ -773,7 +773,7 @@ class MavenDecoderServer:
             analysis = {
                 "artifact": f"{group_id}:{artifact_id}:{version}",
                 "jar_path": str(jar_path),
-                "source": self._path_origin(jar_path),
+                "origin": self._path_origin(jar_path),
                 "size_bytes": jar_path.stat().st_size
             }
             
