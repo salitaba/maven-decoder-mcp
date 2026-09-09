@@ -694,6 +694,8 @@ class MavenDecoderServer:
         logger.debug(f"Listing artifacts with filters: group_id={group_id}, artifact_id={artifact_id}, version={version}, limit={limit}, page={page}, items_per_page={items_per_page}")
         artifacts = []
         count = 0
+        if not self.maven_home.exists() or not self.maven_home.is_dir():
+            return [TextContent(type="text", text=self._missing_repository_message())]
         
         try:
             logger.debug(f"Scanning Maven repository: {self.maven_home}")
@@ -940,6 +942,15 @@ class MavenDecoderServer:
             f"{base}. It is not in the local repository or cache and could not "
             "be downloaded from any configured remote repository. Use "
             "search_maven_central to confirm the coordinates."
+        )
+
+    def _missing_repository_message(self) -> str:
+        """Actionable message when the local Maven repository directory does not exist."""
+        return (
+            f"Maven repository not found at '{self.maven_home}'.\n\n"
+            f"- Set the MAVEN_REPOSITORY environment variable to point to your repository.\n"
+            f"- Running any Maven build (e.g. 'mvn compile') will create the directory.\n"
+            f"- Remote tools (search_maven_central, download_artifact) still work without a local repository."
         )
     
     @staticmethod
