@@ -5,7 +5,7 @@
 
 ---
 
-Ask your coding agent about `com.acme.internal:payments-client` and watch what happens.
+Ask your coding agent about `com.contoso.platform:payments-client` and watch what happens.
 
 It will answer. Confidently. It will produce method names that sound exactly right,
 because they follow every naming convention it has ever seen. They will also be invented,
@@ -56,12 +56,22 @@ Internal artifacts are usually published as bytecode only. Nobody wires up
 That is the normal case, not the edge case, and it is handled:
 
 ```
-The sources jar is missing for com.acme.internal:payments-client. What methods does it expose?
+The sources jar is missing for com.contoso.platform:payments-client. What methods does it expose?
 ```
 
 `extract_class_info` falls back to `javap` internally and returns parsed fields, methods,
 bytecode version, and optional verbose bytecode output. The agent reads what is actually
 compiled into the jar instead of guessing from the artifact name.
+
+The same machinery answers upgrade questions. Point `compare_versions` at two releases of
+a public library and it reports the actual delta rather than a recollection of one —
+`org.jsoup:jsoup` 1.17.2 to 1.23.2 is 45 breaking changes across 47 of 115 classes:
+
+![Comparing jsoup 1.17.2 with 1.23.2](../docs/demo.gif)
+
+Members are compared as declared, so one that moved to a supertype is listed as removed
+even when it stays callable. The tool says so in its own output rather than leaving you
+to discover it.
 
 ## Bonus for gRPC shops
 
@@ -77,8 +87,8 @@ Three specific answers, because this is the question that decides adoption in a
 regulated shop:
 
 **It does not touch `~/.m2`.** Downloads land in a separate cache
-(`~/.cache/maven-decoder-mcp/repository`, configurable via `MAVEN_DECODER_CACHE_DIR`)
-that uses the standard Maven layout. Your Maven and Gradle builds resolve from an
+(`MAVEN_DECODER_CACHE_DIR`, else `$XDG_CACHE_HOME/maven-decoder-mcp/repository`, else
+`~/.cache/maven-decoder-mcp/repository`) that uses the standard Maven layout. Your Maven and Gradle builds resolve from an
 untouched local repository. Every response carries an `origin` field
 (`local-repository` or `remote-cache`) so you always know where a result came from.
 
@@ -104,9 +114,17 @@ npx skills add https://github.com/salitaba/maven-decoder-mcp --skill maven-code-
 
 ---
 
-**Before publishing:**
-- Embed `docs/demo.gif` after the "no sources jar" section
-- Replace `com.acme.internal:payments-client` with a plausible-but-fictional name, and
-  confirm it does not collide with a real published artifact
-- Re-verify every env var name and default against the README — stale config in a post
-  aimed at enterprise readers costs more trust than it earns attention
+**Publish-ready.** Pre-flight done:
+
+- GIF embedded after the "no sources jar" section. The relative path works on GitHub;
+  on dev.to and Reddit, upload the image to the host and replace the link.
+- Artifact name is `com.contoso.platform:payments-client`. Contoso is Microsoft's
+  reserved fictional company, and `com.contoso*` returns 0 hits on Maven Central, so it
+  cannot collide with a real publisher.
+- Every env var checked against `maven_decoder_mcp/config.py`, not the README:
+  `MAVEN_REMOTE_REPOS`, `MAVEN_REMOTE_USERNAME`, `MAVEN_REMOTE_PASSWORD`,
+  `MAVEN_OFFLINE`, `MAVEN_AUTO_DOWNLOAD` (default true), `MAVEN_VERIFY_CHECKSUM`
+  (default true), `MAVEN_MAX_DOWNLOAD_SIZE`, `MAVEN_DECODER_CACHE_DIR`. SHA-1
+  verification is `maven_central.py:480`; cache resolution is `config.py:182`.
+
+Re-check the env var list if `config.py` changes before you post.
