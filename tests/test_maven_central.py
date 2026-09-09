@@ -222,6 +222,45 @@ class TestGetVersions:
                           return_value=make_response(content=self.METADATA)):
             assert client.get_latest_version("com.google.code.gson", "gson") == "2.11.0"
 
+    def _server_with_versions(self, tmp_path):
+        """A server whose remote and local version sources are mocked."""
+        server = MavenDecoderServer(maven_repository=tmp_path / "m2")
+        remote = {
+            "versions": ["2.0.0", "2.1.0-SNAPSHOT"],
+            "release": "2.0.0",
+            "total_versions": 2,
+        }
+        installed = {
+            "versions": [{"version": "1.9.0"}, {"version": "1.10.0-SNAPSHOT"}]
+        }
+        patches = (
+            patch.object(server.central, "get_versions", return_value=remote),
+            patch.object(
+                server.dependency_analyzer, "get_version_info", return_value=installed
+            ),
+        )
+        return server, patches
+
+    @pytest.mark.asyncio
+    async def test_snapshots_are_included_by_default(self, tmp_path):
+        server, patches = self._server_with_versions(tmp_path)
+        with patches[0], patches[1]:
+            result = await server._get_remote_versions("g", "a")
+        data = json.loads(result[0].text)
+        assert data["versions"] == ["2.0.0", "2.1.0-SNAPSHOT"]
+        assert data["installed_versions"] == ["1.10.0-SNAPSHOT", "1.9.0"]
+
+    @pytest.mark.asyncio
+    async def test_snapshots_dropped_when_opted_out(self, tmp_path):
+        server, patches = self._server_with_versions(tmp_path)
+        with patches[0], patches[1]:
+            result = await server._get_remote_versions(
+                "g", "a", include_snapshots=False
+            )
+        data = json.loads(result[0].text)
+        assert data["versions"] == ["2.0.0"]
+        assert data["installed_versions"] == ["1.9.0"]
+
 
 class TestDownload:
     """Downloading, caching, checksum verification and size limits."""
