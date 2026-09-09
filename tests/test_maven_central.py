@@ -23,7 +23,7 @@ from maven_decoder_mcp.maven_central import (
     MavenRemoteError,
     OfflineError,
 )
-from maven_decoder_mcp.maven_decoder_server import MavenDecoderServer
+from maven_decoder_mcp.maven_decoder_server import MavenDecoderServer, is_test_jar
 
 
 def make_response(status_code=200, json_body=None, content=b"", text=None,
@@ -1196,6 +1196,53 @@ class TestUsageExamples:
         ]
         assert data["classes_scanned"] == 1
         assert data["total_matches"] == 1
+
+    @pytest.mark.parametrize(
+        "jar_name, expected",
+        [
+            ("lib-1.0.0-tests.jar", True),
+            ("lib-1.0.0-test.jar", True),
+            ("lib-1.0.0-TESTS.jar", True),
+            # Real artifacts whose names merely contain "test".
+            ("testng-7.0.jar", False),
+            ("latest-utils-1.0.jar", False),
+            ("contest-lib-2.3.jar", False),
+            ("protest-core-1.0.jar", False),
+        ],
+    )
+    def test_only_the_test_jar_classifier_counts_as_a_test_jar(
+        self, jar_name, expected
+    ):
+        assert is_test_jar(jar_name) is expected
+
+    @pytest.mark.asyncio
+    async def test_artifact_named_like_a_test_survives_search_tests_false(
+        self, monkeypatch
+    ):
+        """testng-7.0.jar is a normal dependency, not a Maven test-jar.
+
+        A bare "test" substring match would silently drop it from results
+        whenever a caller passes search_tests=False.
+        """
+        jar_path = self._make_jar("testng-7.0.jar")
+        with zipfile.ZipFile(jar_path, "w") as jar:
+            jar.writestr(
+                "org/testng/Assert.class",
+                make_class_bytes(["com/example/Target", "doWork"]),
+            )
+        monkeypatch.setattr(
+            self.server, "_iter_local_jars", lambda: iter([jar_path])
+        )
+
+        result = await self.server._find_usage_examples(
+            class_name="com.example.Target", search_tests=False
+        )
+        data = json.loads(result[0].text)
+
+        assert [
+            (match["using_class"], match["is_test_jar"])
+            for match in data["matches"]
+        ] == [("org.testng.Assert", False)]
 
     @pytest.mark.asyncio
     async def test_finds_class_that_references_target(self):

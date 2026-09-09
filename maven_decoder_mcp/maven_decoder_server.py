@@ -79,6 +79,19 @@ def get_version() -> str:
             return "0.0.0"
 
 
+# Maven's ``test-jar`` goal attaches the "tests" classifier, so a real test
+# artifact ends in "-tests.jar"; "-test.jar" covers hand-rolled builds that
+# use the singular. A bare "test" substring is not enough: it false-positives
+# on ordinary artifacts such as testng-7.0.jar, latest-utils.jar and
+# contest-lib.jar, which matters because callers use this to *exclude* jars.
+_TEST_JAR_RE = re.compile(r'-tests?(?:-sources|-javadoc)?\.jar$', re.IGNORECASE)
+
+
+def is_test_jar(jar_name: str) -> bool:
+    """True when a jar filename carries Maven's test-jar classifier."""
+    return bool(_TEST_JAR_RE.search(jar_name))
+
+
 class ResponseManager:
     """Manages large responses with pagination and summarization"""
     
@@ -1663,8 +1676,8 @@ class MavenDecoderServer:
                 # Test jars are the best usage examples, but most local
                 # repositories hold very few, so other jars are still scanned
                 # and simply ranked lower.
-                is_test_jar = 'test' in jar_path.name.lower()
-                if is_test_jar and not search_tests:
+                jar_is_test = is_test_jar(jar_path.name)
+                if jar_is_test and not search_tests:
                     continue
 
                 try:
@@ -1717,7 +1730,7 @@ class MavenDecoderServer:
                             matches.append({
                                 "using_class": user_class,
                                 "jar_path": str(jar_path),
-                                "is_test_jar": is_test_jar,
+                                "is_test_jar": jar_is_test,
                                 "artifact_info": self._extract_artifact_info_from_path(jar_path),
                                 "references": target,
                                 "method": method_name,
