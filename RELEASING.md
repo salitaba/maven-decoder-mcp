@@ -8,6 +8,10 @@ How a release goes out, in the order it happens. Follow it; CI enforces it.
 - The **tag is the single source of truth**. CI rewrites
   `pyproject.toml`, `package.json`, and both `__init__.py` files from the
   tag at build time, so the repo copies only need to be sane, not exact.
+- **`server.json` is the exception.** CI does not touch it. Its `version`
+  and both `packages[].version` fields must be edited by hand to the
+  version being released, in the release commit, or the MCP Server Registry
+  will point at the wrong npm and PyPI versions.
 - Pick the next version by SemVer: bug fixes bump patch, new tools or
   features bump minor, incompatible changes bump major.
 
@@ -23,11 +27,23 @@ MAVEN_OFFLINE=true .venv/bin/python -m pytest tests/ -q --no-cov
 .venv/bin/python test_startup.py
 .venv/bin/python -m build && .venv/bin/python -m twine check dist/*
 
-# 2. Draft the notes (edit the result before committing)
+# 2. Bump server.json by hand (CI will not do it): 3 occurrences
+python3 - <<'PY'
+import json, pathlib, sys
+v = "X.Y.Z"
+p = pathlib.Path("server.json"); d = json.loads(p.read_text())
+d["version"] = v
+for pkg in d["packages"]:
+    pkg["version"] = v
+p.write_text(json.dumps(d, indent=2) + "\n")
+print("server.json =>", v)
+PY
+
+# 3. Draft the notes (edit the result before committing)
 python3 scripts/generate_release_notes.py --tag vX.Y.Z
 $EDITOR RELEASE_NOTES.md
 
-# 3. Commit, tag, push
+# 4. Commit, tag, push
 git add -A && git commit -m "release: vX.Y.Z"
 git tag -a vX.Y.Z -m "Maven Decoder MCP Server vX.Y.Z"
 git push origin main && git push origin vX.Y.Z
@@ -51,6 +67,23 @@ npm view maven-decoder-mcp dist-tags.latest
 docker buildx imagetools inspect ali79taba/maven-decoder-mcp:X.Y.Z
 gh release view vX.Y.Z
 ```
+
+## MCP Server Registry
+
+Only after PyPI and npm both show the new version — the registry validates
+ownership by reading the published artifacts, not the git repo. It checks
+`mcpName` in the npm `package.json` and the `<!-- mcp-name: ... -->` comment
+in the PyPI README. Both are committed in this repo; confirm they survived
+into the published version before publishing.
+
+```bash
+npm view maven-decoder-mcp@X.Y.Z mcpName          # must print the namespace
+mcp-publisher login github                        # interactive OAuth as salitaba
+mcp-publisher publish                             # reads ./server.json
+```
+
+If `server.json` still names an older version, publishing succeeds but points
+users at the wrong package version. Fix step 2 and republish.
 
 ## If it fails
 

@@ -18,6 +18,15 @@ Use this verbatim everywhere. Consistency makes the project recognizable across 
 Avoid "comprehensive", "powerful", "advanced". In a list of 400 entries those words are
 invisible; a concrete verb is not.
 
+**Exception — the MCP Server Registry.** Its schema caps `description` at 100 characters
+and the field is plain text, so backticks and the em-dash render literally. `server.json`
+carries a deliberately forked 94-character variant:
+
+> Lets AI agents read the real source of any Maven dependency, decompiled from ~/.m2 or Central.
+
+That fork is intentional. Do not "fix" the two copies into agreement — the prose version
+stays everywhere that has no length cap and renders Markdown.
+
 ## Category placement
 
 Submit under **developer tools / code intelligence**, not "Java".
@@ -33,9 +42,19 @@ and several downstream directories seed from that registry. So it is not one of 
 equal targets — it is the upstream one, and it is the only target here that needs a code
 change first.
 
-Publishing requires a `server.json` at the repo root, which this repo does not have. It
-also requires namespace ownership proof for `io.github.salitaba`, done via GitHub OAuth
-in the `mcp-publisher` CLI.
+`server.json` now exists at the repo root and validates against the
+`2025-12-11` schema. Publishing also requires namespace ownership proof for
+`io.github.salitaba`, done via GitHub OAuth in the `mcp-publisher` CLI.
+
+Two ownership markers must be in the **published artifacts**, not merely in git — the
+registry reads the npm tarball and the PyPI sdist:
+
+- `"mcpName": "io.github.salitaba/maven-decoder-mcp"` in `package.json` (npm)
+- `<!-- mcp-name: io.github.salitaba/maven-decoder-mcp -->` as the first line of
+  `README.md` (PyPI; it lands in both the sdist README and `PKG-INFO`)
+
+Both are committed, so a release cut after that commit carries them. Editing them alone
+publishes nothing — cut a release per `RELEASING.md` first, then run `mcp-publisher`.
 
 The version to record is **1.3.1** — what is actually on PyPI and npm. Do not read it out
 of `pyproject.toml` or `package.json`; those say `1.3.0` by design. Per `RELEASING.md`,
@@ -49,7 +68,7 @@ Ordered by leverage, not alphabetically. Do them over several days, not one afte
 
 | # | Target | Route | Notes | Status |
 |---|---|---|---|---|
-| 1 | MCP Server Registry | `mcp-publisher` CLI + `server.json` | Upstream of several directories. Needs a `server.json`, which the repo does not have yet. Record version `1.3.1`. | ☐ |
+| 1 | MCP Server Registry | `mcp-publisher` CLI + `server.json` | Upstream of several directories. `server.json` exists and validates. Blocked only on releasing a version whose npm tarball and PyPI sdist carry the ownership markers. | ☐ |
 | 2 | `punkpeye/awesome-mcp-servers` | PR to `main`, `README.md` | 94k stars, the highest-traffic list. Format is strict — see below. | ☐ |
 | 3 | Glama MCP directory | web submit / auto-index | Also issues the badge that `punkpeye` entries carry. Do before #2 so the badge URL resolves. | ☐ |
 | 4 | `wong2/awesome-mcp-servers` | PR to `main`, `## Community Servers` | 4.3k stars. Different format from #2 — do not paste the same line. | ☐ |

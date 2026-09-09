@@ -1,3 +1,5 @@
+<!-- mcp-name: io.github.salitaba/maven-decoder-mcp -->
+
 # Maven Decoder MCP Server
 
 [![skills.sh](https://skills.sh/b/salitaba/maven-decoder-mcp)](https://skills.sh/salitaba/maven-decoder-mcp)
