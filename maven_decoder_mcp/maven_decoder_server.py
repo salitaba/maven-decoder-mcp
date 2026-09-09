@@ -420,6 +420,7 @@ class MavenDecoderServer:
                             "class_name": {"type": "string", "description": "Class name to search for (supports wildcards)"},
                             "package_pattern": {"type": "string", "description": "Package pattern to filter by"},
                             "annotation": {"type": "string", "description": "Search for classes with specific annotation"},
+                            "case_sensitive": {"type": "boolean", "default": True, "description": "Match class_name and package_pattern case-sensitively. Set false for a case-insensitive search (e.g. 'arraylist' matches 'ArrayList')."},
                             "limit": {"type": "integer", "default": 100, "description": "Maximum results to return"},
                             "page": {"type": "integer", "default": 1, "description": "Page number for pagination"},
                             "items_per_page": {"type": "integer", "default": 20, "description": "Items per page"}
@@ -1102,12 +1103,24 @@ class MavenDecoderServer:
     async def _search_classes(self, class_name: Optional[str] = None,
                             package_pattern: Optional[str] = None,
                             annotation: Optional[str] = None,
+                            case_sensitive: bool = True,
                             limit: int = 100, page: int = 1, items_per_page: int = 20) -> List[TextContent]:
         """Search for classes across all jars in every local root"""
         import re
         matches = []
         count = 0
-        
+
+        # Compile the name/package patterns once up front rather than re-running
+        # re.search with a raw string for every class in every jar. When
+        # case_sensitive is False, matching is case-insensitive (e.g. a query of
+        # "arraylist" matches "ArrayList"). Annotation matching keeps its own
+        # always-insensitive behavior in _matching_annotations.
+        flags = 0 if case_sensitive else re.IGNORECASE
+        class_re = (
+            re.compile(class_name.replace('*', '.*'), flags) if class_name else None
+        )
+        package_re = re.compile(package_pattern, flags) if package_pattern else None
+
         try:
             for jar_path in self._iter_local_jars():
                 if count >= limit:
@@ -1126,10 +1139,10 @@ class MavenDecoderServer:
                             package = '.'.join(class_full_name.split('.')[:-1])
                             
                             # Apply filters
-                            if class_name and not re.search(class_name.replace('*', '.*'), simple_name):
+                            if class_re and not class_re.search(simple_name):
                                 continue
-                            
-                            if package_pattern and not re.search(package_pattern, package):
+
+                            if package_re and not package_re.search(package):
                                 continue
                             
                             match_info = {
