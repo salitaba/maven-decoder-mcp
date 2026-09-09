@@ -13,15 +13,12 @@ name the exact file and function to change and the test to add. Start there.
 git clone https://github.com/salitaba/maven-decoder-mcp.git
 cd maven-decoder-mcp
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]" pytest-cov
+pip install -e ".[dev]"
 ./setup_decompilers.sh
 ```
 
 Python 3.10 or newer, and a JDK on `PATH` — `javap` is what makes artifacts without a
 sources jar readable.
-
-`pytest-cov` is installed explicitly because `pytest.ini` enables `--cov` by default but
-it is not yet in the `dev` extra. If that annoys you, that is a legitimate first PR.
 
 `setup_decompilers.sh` downloads CFR and Procyon. It is optional; without them you get
 `javap` output instead of decompiled source, and most tests still pass.

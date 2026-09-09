@@ -37,11 +37,11 @@ Publishing requires a `server.json` at the repo root, which this repo does not h
 also requires namespace ownership proof for `io.github.salitaba`, done via GitHub OAuth
 in the `mcp-publisher` CLI.
 
-Blocking detail before you publish: **the version is inconsistent.** `package.json`,
-`pyproject.toml`, and `maven_decoder_mcp/__init__.py` all say `1.3.0`, but the most
-recent commit is `release: v1.3.1`. The registry records a version and people file bugs
-against it. Reconcile that first — a registry entry pointing at a version that does not
-exist is worse than no entry.
+The version to record is **1.3.1** — what is actually on PyPI and npm. Do not read it out
+of `pyproject.toml` or `package.json`; those say `1.3.0` by design. Per `RELEASING.md`,
+the git tag is the single source of truth and the release workflow rewrites all three
+manifests from the tag at build time, so the in-repo copies lag deliberately. Take the
+version from `git tag --list | tail -1`.
 
 ## Targets
 
@@ -49,7 +49,7 @@ Ordered by leverage, not alphabetically. Do them over several days, not one afte
 
 | # | Target | Route | Notes | Status |
 |---|---|---|---|---|
-| 1 | MCP Server Registry | `mcp-publisher` CLI + `server.json` | Upstream of several directories. Needs `server.json` and the version fix. | ☐ |
+| 1 | MCP Server Registry | `mcp-publisher` CLI + `server.json` | Upstream of several directories. Needs a `server.json`, which the repo does not have yet. Record version `1.3.1`. | ☐ |
 | 2 | `punkpeye/awesome-mcp-servers` | PR to `main`, `README.md` | 94k stars, the highest-traffic list. Format is strict — see below. | ☐ |
 | 3 | Glama MCP directory | web submit / auto-index | Also issues the badge that `punkpeye` entries carry. Do before #2 so the badge URL resolves. | ☐ |
 | 4 | `wong2/awesome-mcp-servers` | PR to `main`, `## Community Servers` | 4.3k stars. Different format from #2 — do not paste the same line. | ☐ |

@@ -39,20 +39,15 @@ the function names are the stable reference.
 Tool declarations live in the `name=` list starting around
 `maven_decoder_server.py:344`; each has an `async def _handler` further down.
 
-## Issue 0 — file this one first
+## Issue 0 — already fixed, do not file
 
-**`pytest-cov` is missing from the `dev` extra.** `pytest.ini` sets `--cov=maven_decoder_mcp`
-in `addopts`, but `pyproject.toml`'s `[project.optional-dependencies] dev` list omits
-`pytest-cov` (it is in `requirements.txt` and installed explicitly in both CI workflows).
-So `pip install -e ".[dev]" && pytest` fails for a new contributor on the very first
-command they run.
+**`pytest-cov` was missing from the `dev` extra.** `pytest.ini` sets
+`--cov=maven_decoder_mcp` in `addopts`, but `[project.optional-dependencies] dev` omitted
+`pytest-cov` (it was only in `requirements.txt` and installed explicitly in both CI
+workflows). `pip install -e ".[dev]" && pytest` therefore failed for a new contributor on
+the first command they ran — the exact path `CONTRIBUTING.md` sends people down.
 
-Fix: add `"pytest-cov>=4.0.0"` to the `dev` list in `pyproject.toml`, then drop the
-workaround note from `CONTRIBUTING.md`.
-
-This is the highest-value issue on the list because it breaks the onboarding path
-described in the file that points people at these issues. File it first, or just fix it
-yourself before publishing any of the others.
+Fixed in `pyproject.toml` rather than filed, since it blocks every other issue here.
 
 ## Candidate issues
 
