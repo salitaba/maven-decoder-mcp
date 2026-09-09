@@ -607,6 +607,7 @@ class MavenDecoderServer:
                         "properties": {
                             "group_id": {"type": "string", "description": "Maven group ID"},
                             "artifact_id": {"type": "string", "description": "Maven artifact ID"},
+                            "include_snapshots": {"type": "boolean", "default": True, "description": "Include -SNAPSHOT versions. Set false to list only released versions."},
                             "limit": {"type": "integer", "default": 100, "description": "Maximum versions to return"}
                         },
                         "required": ["group_id", "artifact_id"],
@@ -1775,6 +1776,7 @@ class MavenDecoderServer:
             return [TextContent(type="text", text=f"Error searching Maven Central: {str(e)}")]
 
     async def _get_remote_versions(self, group_id: str, artifact_id: str,
+                                   include_snapshots: bool = True,
                                    limit: int = 100) -> List[TextContent]:
         """List versions published on the remote repository."""
         try:
@@ -1782,12 +1784,25 @@ class MavenDecoderServer:
                 self.central.get_versions, group_id, artifact_id, limit
             )
 
+            # Snapshot filtering lives here, not in MavenCentralClient, which
+            # stays a faithful view of the remote index. Detection is a simple
+            # case-insensitive "-SNAPSHOT" suffix check (no version parsing).
+            def _is_snapshot(version: str) -> bool:
+                return str(version).upper().endswith("-SNAPSHOT")
+
+            if not include_snapshots and isinstance(result.get("versions"), list):
+                result["versions"] = [
+                    v for v in result["versions"] if not _is_snapshot(v)
+                ]
+
             installed = {
                 entry["version"]
                 for entry in self.dependency_analyzer.get_version_info(
                     group_id, artifact_id
                 ).get("versions", [])
             }
+            if not include_snapshots:
+                installed = {v for v in installed if not _is_snapshot(v)}
             result["installed_versions"] = sorted(installed)
 
             if self.response_manager.should_summarize(json.dumps(result, indent=2)):
