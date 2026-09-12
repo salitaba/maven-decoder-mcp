@@ -512,7 +512,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📊 Stats
 
 ![GitHub Stars](https://img.shields.io/github/stars/salitaba/maven-decoder-mcp)
+![GitHub Forks](https://img.shields.io/github/forks/salitaba/maven-decoder-mcp)
 ![PyPI Downloads](https://img.shields.io/pypi/dm/maven-decoder-mcp)
+![npm Downloads](https://img.shields.io/npm/dm/maven-decoder-mcp)
 ![Docker Pulls](https://img.shields.io/docker/pulls/ali79taba/maven-decoder-mcp)
 
 ---
