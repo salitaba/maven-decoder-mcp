@@ -224,6 +224,20 @@ The skill is located at `skills/maven-code-search` and is ready for skills.sh in
 | `get_remote_versions` | List every version published remotely, flagging which are installed |
 | `download_artifact` | Download an artifact (jar/sources/POM) into the local cache; accepts `latest` |
 
+### Tool parameters
+
+| Tool | Parameter | Type | Default | Description |
+|------|-----------|------|---------|-------------|
+| `list_artifacts` | `group_id`* | string | — | Filter by group ID (e.g., 'org.springframework') |
+| `list_artifacts` | `artifact_id`* | string | — | Filter by artifact ID (e.g., 'spring-core') |
+| `list_artifacts` | `version`* | string | — | Filter by version (e.g., '5.3.21') |
+| `list_artifacts` | `sort_by` | string | name | Order results by: 'name' (group/artifact/version ascending, default), 'size' (largest jars first), or 'modified' (most recently modified first). Unknown values fall back to 'name'. |
+| `list_artifacts` | `limit` | integer | 50 | Maximum number of artifacts to return |
+| `list_artifacts` | `page` | integer | 1 | Page number for pagination |
+| `list_artifacts` | `items_per_page` | integer | 20 | Items per page |
+
+\* required (no default provided)
+
 ## 💡 Usage Examples
 
 ### Finding Dependencies
