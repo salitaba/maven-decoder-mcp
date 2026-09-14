@@ -256,6 +256,17 @@ removed even though it may still be callable.
 "Show me all public methods in the Jackson ObjectMapper class"
 ```
 
+### Finding Real Callers
+```
+"Find classes that call ObjectMapper.readValue, including examples from test jars"
+```
+`find_usage_examples` scans compiled class constant pools, so it finds real callers
+rather than simple name matches. Pass `method_name` (such as `readValue`) to narrow
+the results to callers of a specific method. Test jars are included by default and
+ranked first because they often contain the clearest examples; set `search_tests` to
+`false` to exclude them. The scan stops after `MCP_USAGE_SCAN_LIMIT` classes (default:
+200000) to stay responsive on large repositories.
+
 ### Inspecting Compiled-Only Artifacts
 ```
 "The sources jar is missing. Use extract_class_info for bytecode-backed fields and methods."
