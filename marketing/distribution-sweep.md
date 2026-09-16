@@ -70,7 +70,7 @@ go install github.com/modelcontextprotocol/registry/cmd/publisher@latest
 ln -sf ~/go/bin/publisher ~/go/bin/mcp-publisher   # binary is named `publisher`
 ```
 
-The version to record is **1.3.1** — what is actually on PyPI and npm. Do not read it out
+The version to record is **1.3.2** — what is actually on PyPI and npm. Do not read it out
 of `pyproject.toml` or `package.json`; those say `1.3.0` by design. Per `RELEASING.md`,
 the git tag is the single source of truth and the release workflow rewrites all three
 manifests from the tag at build time, so the in-repo copies lag deliberately. Take the
@@ -83,9 +83,9 @@ Ordered by leverage, not alphabetically. Do them over several days, not one afte
 | # | Target | Route | Notes | Status |
 |---|---|---|---|---|
 | 1 | MCP Server Registry | `mcp-publisher` CLI + `server.json` | Published 2026-09-09 as `io.github.salitaba/maven-decoder-mcp` v1.3.2, status `active`. Upstream of several directories, so give downstream lists a few days to seed before submitting by hand. | ☑ |
-| 2 | `punkpeye/awesome-mcp-servers` | PR to `main`, `README.md` | 94k stars, the highest-traffic list. Format is strict — see below. Branch ready: `salitaba/awesome-mcp-servers` @ `add-maven-decoder-mcp`. Not yet filed. | ☐ |
+| 2 | `punkpeye/awesome-mcp-servers` | PR to `main`, `README.md` | 94k stars, the highest-traffic list. Format is strict — see below. Filed 2026-09-16 as [punkpeye/awesome-mcp-servers#14525](https://github.com/punkpeye/awesome-mcp-servers/pull/14525), awaiting review. Title carries the `🤖🤖🤖` agent marker their CONTRIBUTING.md asks for. | ☑ |
 | 3 | Glama MCP directory | web submit / auto-index | **Already auto-indexed** — listed under Developer Tools / Code Analysis, Python + Local, badge URL resolves. Do not submit by hand. Optionally "Claim" the server to get the admin panel. | ☑ |
-| 4 | `wong2/awesome-mcp-servers` | PR to `main`, `## Community Servers` | 4.3k stars. Different format from #2 — do not paste the same line. Branch ready: `salitaba/awesome-mcp-servers-1` @ `add-maven-decoder`. Not yet filed. | ☐ |
+| 4 | `wong2/awesome-mcp-servers` | PR to `main`, `## Community Servers` | 4.3k stars. Different format from #2 — do not paste the same line. **Blocked: must be opened by hand in a browser.** Branch ready and pushed: `salitaba/awesome-mcp-servers-1` @ `add-maven-decoder`. `gh pr create` fails with `salitaba does not have the correct permissions to execute CreatePullRequest`; fork parent, base and head all verified correct, and the same token filed #2 seconds earlier, so it is upstream interaction limits, not auth. | ☐ |
 | 5 | mcp.so | web submit | Confirmed absent 2026-09-09 (search returns only `FangYuan33/Easy Code Reader`). Submit link is in the site header. | ☐ |
 | 6 | PulseMCP | web submit | Presence unverified — the site 403s scripted requests, so check by hand in a browser before submitting. | ☐ |
 | 7 | mcpservers.org | web submit | Confirmed absent 2026-09-09. Six `maven` results, none ours; nearest is `terseprompts/jarp-mcp`. Category: Development. | ☐ |
