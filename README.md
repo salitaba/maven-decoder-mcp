@@ -580,6 +580,32 @@ maven-decoder-setup status
 # Install the optional CFR and Procyon decompilers
 maven-decoder-setup decompilers
 ```
+From a source checkout you can instead run `./setup_decompilers.sh`, which downloads
+CFR and Procyon into a `decompilers/` directory beside the script, as
+`decompilers/cfr.jar` and `decompilers/procyon-decompiler.jar`.
+
+If `maven-decoder-setup status` reports no decompilers even though you have the jars,
+they are somewhere the server does not look. It searches these roots in order, taking
+the first match:
+
+1. `$MAVEN_DECODER_DECOMPILER_DIR`, if set
+2. `decompilers/` inside the installed package
+3. `decompilers/` beside the package — the source-checkout layout
+4. `~/.cache/maven-decoder-mcp/decompilers`
+5. `decompilers/` in the current working directory
+6. the current working directory itself
+
+Your MCP client launches the server from an arbitrary working directory, so the last
+two are unreliable in practice. If your jars live anywhere else, point at them
+explicitly:
+
+```bash
+export MAVEN_DECODER_DECOMPILER_DIR=~/tools/decompilers
+```
+
+The directory must contain the jars under the exact names `cfr.jar` and
+`procyon-decompiler.jar`. The value expands `~` and environment variables.
+
 Without CFR or Procyon the server still works, falling back to `javap` from
 the JDK for signatures, fields and methods.
 
