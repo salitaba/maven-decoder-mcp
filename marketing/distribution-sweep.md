@@ -62,13 +62,25 @@ Done as of v1.3.2. To re-publish after a future release:
 mcp-publisher validate && mcp-publisher login github && mcp-publisher publish
 ```
 
-There is **no prebuilt `mcp-publisher` binary** — the registry's GitHub releases ship
-only the registry server. Build it from source:
+Prebuilt `mcp-publisher` binaries now exist — verified 2026-09-16 against release
+`v1.8.1`, which ships `darwin`/`linux`/`windows` × `amd64`/`arm64` tarballs alongside
+the registry server, each with an SBOM and a sigstore bundle. Homebrew carries it too.
+The build-from-source step this file used to require is no longer necessary:
 
 ```bash
-go install github.com/modelcontextprotocol/registry/cmd/publisher@latest
-ln -sf ~/go/bin/publisher ~/go/bin/mcp-publisher   # binary is named `publisher`
+brew install mcp-publisher
 ```
+
+Or, without Homebrew:
+
+```bash
+curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher && sudo mv mcp-publisher /usr/local/bin/
+```
+
+Note that the upstream quickstart's sequence is `login` → `init` → `publish`. `init`
+**generates** a `server.json`, so it belongs to first-time setup only — do not run it
+when re-publishing, or it will overwrite the hand-tuned file at the repo root,
+including the deliberately forked 94-character `description`.
 
 The version to record is **1.3.2** — what is actually on PyPI and npm. Do not read it out
 of `pyproject.toml` or `package.json`; those say `1.3.0` by design. Per `RELEASING.md`,
