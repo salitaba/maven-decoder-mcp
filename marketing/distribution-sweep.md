@@ -100,7 +100,7 @@ Ordered by leverage, not alphabetically. Do them over several days, not one afte
 | 4 | `wong2/awesome-mcp-servers` | PR to `main`, `## Community Servers` | 4.3k stars. Different format from #2 — do not paste the same line. **Blocked: must be opened by hand in a browser.** Branch ready and pushed: `salitaba/awesome-mcp-servers-1` @ `add-maven-decoder`. `gh pr create` fails with `salitaba does not have the correct permissions to execute CreatePullRequest`; fork parent, base and head all verified correct, and the same token filed #2 seconds earlier, so it is upstream interaction limits, not auth. | ☐ |
 | 5 | mcp.so | web submit | Confirmed absent 2026-09-09 (search returns only `FangYuan33/Easy Code Reader`). Submit link is in the site header. | ☐ |
 | 6 | PulseMCP | web submit | Presence unverified — the site 403s scripted requests, so check by hand in a browser before submitting. | ☐ |
-| 7 | mcpservers.org | web submit | Confirmed absent 2026-09-09. Six `maven` results, none ours; nearest is `terseprompts/jarp-mcp`. Category: Development. | ☐ |
+| 7 | mcpservers.org | web submit | **Submitted by hand 2026-09-16, awaiting listing** — not yet verified as live. Was confirmed absent 2026-09-09 (six `maven` results, none ours; nearest is `terseprompts/jarp-mcp`). Category: Development. Re-check the listing before ticking this. | ◐ |
 | 8 | Smithery | registry submit | **Poor fit — deprioritize.** Its registry is effectively remote-server-only; every result carries `remote: true`, and this server is stdio/local. Revisit only if Smithery adds local-package listings. | ☐ |
 | 9 | Cursor MCP directory | submit | Repo already ships `cursor_mcp_config_template.json`. Link it. | ☐ |
 | 10 | skills.sh | already indexed | Badge in README. | ☑ |
