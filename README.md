@@ -224,6 +224,122 @@ The skill is located at `skills/maven-code-search` and is ready for skills.sh in
 | `get_remote_versions` | List every version published remotely, flagging which are installed |
 | `download_artifact` | Download an artifact (jar/sources/POM) into the local cache; accepts `latest` |
 
+| Tool | Parameter | Type | Default | Description |
+|------|-----------|------|---------|-------------|
+| `list_artifacts` | `group_id`* | string | — | Filter by group ID (e.g., 'org.springframework') |
+| `list_artifacts` | `artifact_id`* | string | — | Filter by artifact ID (e.g., 'spring-core') |
+| `list_artifacts` | `version`* | string | — | Filter by version (e.g., '5.3.21') |
+| `list_artifacts` | `sort_by` | string | name | Order results by: 'name' (group/artifact/version ascending, default), 'size' (largest jars first), or 'modified' (most recently modified first). Unknown values fall back to 'name'. |
+| `list_artifacts` | `limit` | integer | 50 | Maximum number of artifacts to return |
+| `list_artifacts` | `page` | integer | 1 | Page number for pagination |
+| `list_artifacts` | `items_per_page` | integer | 20 | Items per page |
+| `analyze_jar` | `group_id`* | string | — | Maven group ID |
+| `analyze_jar` | `artifact_id`* | string | — | Maven artifact ID |
+| `analyze_jar` | `version`* | string | — | Maven version |
+| `analyze_jar` | `include_bytecode` | boolean | False | Include bytecode analysis |
+| `analyze_jar` | `include_manifest` | boolean | True | Include JAR manifest |
+| `analyze_jar` | `summarize_large_content` | boolean | True | Summarize large content automatically |
+| `extract_class_info` | `group_id`* | string | — | Maven group ID |
+| `extract_class_info` | `artifact_id`* | string | — | Maven artifact ID |
+| `extract_class_info` | `version`* | string | — | Maven version |
+| `extract_class_info` | `class_pattern`* | string | -- | Pattern to match class names (regex supported) |
+| `extract_class_info` | `include_methods` | boolean | True | Include method signatures |
+| `extract_class_info` | `include_fields` | boolean | True | Include field information |
+| `extract_class_info` | `include_bytecode` | boolean | False | Include verbose javap bytecode output for matched classes |
+| `extract_class_info` | `page` | integer | 1 | Page number for pagination |
+| `extract_class_info` | `items_per_page` | integer | 20 | Items per page |
+| `extract_class_info` | `summarize_large_content` | boolean | True | Summarize large content automatically |
+| `get_dependencies` | `group_id`* | string | — | Maven group ID |
+| `get_dependencies` | `artifact_id`* | string | — | Maven artifact ID |
+| `get_dependencies` | `version`* | string | — | Maven version |
+| `get_dependencies` | `include_transitive` | boolean | False | Include transitive dependencies |
+| `get_dependencies` | `page` | integer | 1 | Page number for pagination |
+| `get_dependencies` | `items_per_page` | integer | 20 | Items per page |
+| `search_classes` | `class_name`* | string | — | Class name to search for (supports wildcards) |
+| `search_classes` | `package_pattern`* | string | — | Package pattern to filter by |
+| `search_classes` | `annotation`* | string | — | Search for classes with specific annotation |
+| `search_classes` | `case_sensitive` | boolean | True | Match class_name and package_pattern case-sensitively. Set false for a case-insensitive search (e.g. 'arraylist' matches 'ArrayList'). |
+| `search_classes` | `limit` | integer | 100 | Maximum results to return |
+| `search_classes` | `page` | integer | 1 | Page number for pagination |
+| `search_classes` | `items_per_page` | integer | 20 | Items per page |
+| `extract_source_code` | `group_id`* | string | — | Maven group ID |
+| `extract_source_code` | `artifact_id`* | string | — | Maven artifact ID |
+| `extract_source_code` | `version`* | string | — | Maven version |
+| `extract_source_code` | `class_name`* | string | -- | Fully qualified class name |
+| `extract_source_code` | `prefer_sources` | boolean | True | Prefer source jar over decompilation |
+| `extract_source_code` | `summarize_large_content` | boolean | True | Summarize large content automatically |
+| `extract_source_code` | `max_lines` | integer | 500 | Maximum lines to return (0 for all) |
+| `extract_jar_resource` | `group_id`* | string | — | Maven group ID |
+| `extract_jar_resource` | `artifact_id`* | string | — | Maven artifact ID |
+| `extract_jar_resource` | `version`* | string | — | Maven version |
+| `extract_jar_resource` | `resource_path`* | string | -- | Exact resource path inside the jar |
+| `extract_jar_resource` | `resource_pattern`* | string | -- | Regex pattern to match resource paths |
+| `extract_jar_resource` | `max_bytes` | integer | 65536 | Maximum bytes to read per resource |
+| `extract_jar_resource` | `limit` | integer | 20 | Maximum matching resources to return |
+| `compare_versions` | `group_id`* | string | — | Maven group ID |
+| `compare_versions` | `artifact_id`* | string | — | Maven artifact ID |
+| `compare_versions` | `version1`* | string | — | First (older) version to compare |
+| `compare_versions` | `version2`* | string | -- | Second (newer) version to compare |
+| `compare_versions` | `compare_api` | boolean | True | Diff the public API: added/removed public and protected methods and fields, and breaking changes |
+| `compare_versions` | `resolve_inherited` | boolean | False | Reclassify members that disappeared from a class but are still declared on a supertype within the new jar into a 'moved to supertype' bucket instead of counting them as breaking removals. Defaults to false (byte-identical to the as-declared diff). |
+| `compare_versions` | `summarize_large_content` | boolean | True | Summarize large content automatically |
+| `find_usage_examples` | `class_name`* | string | — | Class name to find usage for |
+| `find_usage_examples` | `method_name`* | string | — | Method name to find usage for |
+| `find_usage_examples` | `search_tests` | boolean | True | Search in test jars |
+| `find_usage_examples` | `limit` | integer | 50 | Maximum results to return |
+| `find_usage_examples` | `page` | integer | 1 | Page number for pagination |
+| `find_usage_examples` | `items_per_page` | integer | 20 | Items per page |
+| `get_dependency_tree` |  `group_id`* | string | — | Maven group ID |
+| `get_dependency_tree` | `artifact_id`* | string | — | Maven artifact ID |
+| `get_dependency_tree` | `version`* | string | -- | Maven version |
+| `get_dependency_tree` | `max_depth` | integer | 3 | Maximum depth to show |
+| `get_dependency_tree` | `summarize_large_content` | boolean | True | Summarize large content automatically |
+| `find_dependents` | `group_id`* | string | — | Target group ID |
+| `find_dependents` | `artifact_id`* | string | — | Target artifact ID |
+| `find_dependents` | `version`* | string | — | Specific version to search for (optional) |
+| `find_dependents` | `limit` | integer | 100 | Maximum results to return |
+| `find_dependents` | `page` | integer | 1 | Page number for pagination |
+| `find_dependents` | `items_per_page` | integer | 20 | Items per page |
+| `get_version_info` | `group_id`* | string | — | Maven group ID |
+| `get_version_info` | `artifact_id`* | string | — | Maven artifact ID |
+| `get_version_info` | `include_remote` | boolean | False | Also list versions published on the remote repository (not just installed ones) |
+| `get_version_info` | `limit` | integer | 50 | Maximum results to return |
+| `get_version_info` | `page` | integer | 1 | Page number for pagination |
+| `get_version_info` | `items_per_page` | integer | 20 | Items per page |
+| `analyze_jar_structure` |  `group_id`* | string | — | Maven group ID |
+| `analyze_jar_structure` | `artifact_id`* | string | — | Maven artifact ID |
+| `analyze_jar_structure` | `version`* | string | -- | Maven version |
+| `analyze_jar_structure` | `summarize_large_content` | boolean | True | Summarize large content automatically |
+| `extract_method_info` |  `group_id`* | string | — | Maven group ID |
+| `extract_method_info` | `artifact_id`* | string | — | Maven artifact ID |
+| `extract_method_info` | `version`* | string | -- | Maven version |
+| `extract_method_info` | `class_name`* | string | — | Fully qualified class name |
+| `extract_method_info` | `method_pattern`* | string | -- | Pattern to match method names (regex supported) |
+| `extract_method_info` | `include_bytecode` | boolean | False | Include bytecode analysis |
+| `extract_method_info` | `max_methods` | integer | 10 | Maximum number of methods to return |
+| `search_maven_central` |  `query`* | string | — | Free-text search term (e.g. 'jackson databind') |
+| `search_maven_central` |  `group_id`* | string | — | Exact group ID filter (e.g. 'org.springframework') |
+| `search_maven_central` | `artifact_id`* | string | — | Exact artifact ID filter (e.g. 'spring-core') |
+| `search_maven_central` | `class_name`* | string | — | Simple class name to find the containing artifact (e.g. 'ObjectMapper') |
+| `search_maven_central` | `fully_qualified_class`* | string | — | Fully qualified class name (e.g. 'com.fasterxml.jackson.databind.ObjectMapper') |
+| `search_maven_central` | `packaging`* | string | — | Packaging filter (e.g. 'jar', 'pom') |
+| `search_maven_central` | `all_versions` | boolean | False | Return every published version instead of only the latest per artifact |
+| `search_maven_central` | `limit` | integer | 20 | Maximum results to return (max 200) |
+| `search_maven_central` | `page` | integer | 1 | Page number for pagination |
+| `get_remote_versions` |  `group_id`* | string | — | Maven group ID |
+| `get_remote_versions` | `artifact_id`* | string | — | Maven artifact ID |
+| `get_remote_versions` | `include_snapshots` | boolean | True | Include -SNAPSHOT versions. Set false to list only released versions. |
+| `get_remote_versions` | `limit` | integer | 100 | Maximum versions to return |
+| `download_artifact` |  `group_id`* | string | — | Maven group ID |
+| `download_artifact` | `artifact_id`* | string | — | Maven artifact ID |
+| `download_artifact` | `version`* | string | -- | Version to download, or 'latest' for the newest release |
+| `download_artifact` | `include_sources` | boolean | True | Also download the sources jar when published |
+| `download_artifact` | `include_javadoc` | boolean | False | Also download the javadoc jar when published |
+| `download_artifact` |  `classifier`* | string | — | Download a specific classified jar instead of the main one|
+| `download_artifact` | `force` | boolean | False | Re-download even when the file is already cached |
+
+\* Parameters that have no default or are in the required list are identified with *
+
 ## 💡 Usage Examples
 
 ### Finding Dependencies
