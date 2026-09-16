@@ -83,13 +83,13 @@ Ordered by leverage, not alphabetically. Do them over several days, not one afte
 | # | Target | Route | Notes | Status |
 |---|---|---|---|---|
 | 1 | MCP Server Registry | `mcp-publisher` CLI + `server.json` | Published 2026-09-09 as `io.github.salitaba/maven-decoder-mcp` v1.3.2, status `active`. Upstream of several directories, so give downstream lists a few days to seed before submitting by hand. | ☑ |
-| 2 | `punkpeye/awesome-mcp-servers` | PR to `main`, `README.md` | 94k stars, the highest-traffic list. Format is strict — see below. | ☐ |
-| 3 | Glama MCP directory | web submit / auto-index | Also issues the badge that `punkpeye` entries carry. Do before #2 so the badge URL resolves. | ☐ |
-| 4 | `wong2/awesome-mcp-servers` | PR to `main`, `## Community Servers` | 4.3k stars. Different format from #2 — do not paste the same line. | ☐ |
-| 5 | mcp.so | web submit | ☐ |
-| 6 | PulseMCP | web submit | ☐ |
-| 7 | mcpservers.org | web submit | ☐ |
-| 8 | Smithery | registry submit | Verify whether it wants a hosted endpoint; this server is stdio/local. | ☐ |
+| 2 | `punkpeye/awesome-mcp-servers` | PR to `main`, `README.md` | 94k stars, the highest-traffic list. Format is strict — see below. Branch ready: `salitaba/awesome-mcp-servers` @ `add-maven-decoder-mcp`. Not yet filed. | ☐ |
+| 3 | Glama MCP directory | web submit / auto-index | **Already auto-indexed** — listed under Developer Tools / Code Analysis, Python + Local, badge URL resolves. Do not submit by hand. Optionally "Claim" the server to get the admin panel. | ☑ |
+| 4 | `wong2/awesome-mcp-servers` | PR to `main`, `## Community Servers` | 4.3k stars. Different format from #2 — do not paste the same line. Branch ready: `salitaba/awesome-mcp-servers-1` @ `add-maven-decoder`. Not yet filed. | ☐ |
+| 5 | mcp.so | web submit | Confirmed absent 2026-09-09 (search returns only `FangYuan33/Easy Code Reader`). Submit link is in the site header. | ☐ |
+| 6 | PulseMCP | web submit | Presence unverified — the site 403s scripted requests, so check by hand in a browser before submitting. | ☐ |
+| 7 | mcpservers.org | web submit | Confirmed absent 2026-09-09. Six `maven` results, none ours; nearest is `terseprompts/jarp-mcp`. Category: Development. | ☐ |
+| 8 | Smithery | registry submit | **Poor fit — deprioritize.** Its registry is effectively remote-server-only; every result carries `remote: true`, and this server is stdio/local. Revisit only if Smithery adds local-package listings. | ☐ |
 | 9 | Cursor MCP directory | submit | Repo already ships `cursor_mcp_config_template.json`. Link it. | ☐ |
 | 10 | skills.sh | already indexed | Badge in README. | ☑ |
 | — | `modelcontextprotocol/servers` | **do not file** | List retired; PR gets closed unread. Superseded by #1. | ✗ |
@@ -99,8 +99,9 @@ Ordered by leverage, not alphabetically. Do them over several days, not one afte
 ### `punkpeye/awesome-mcp-servers` — under `### 💻 Developer Tools`
 
 Entries carry a Glama badge and legend emoji: 🐍 Python, 🏠 local service, 🍎 macOS,
-🪟 Windows, 🐧 Linux. Alphabetical by `owner/repo`, so this lands between the `ma…` and
-`mc…` entries.
+🪟 Windows, 🐧 Linux. Alphabetical by **owner**, not by repo name — verified 2026-09-09
+against the live list. So this lands in the `sa…` run, between `ryan0204/github-repo-mcp`
+and `sammcj/mcp-package-version`, not near the `maven-*` entries.
 
 ```markdown
 - [salitaba/maven-decoder-mcp](https://github.com/salitaba/maven-decoder-mcp) [![salitaba/maven-decoder-mcp MCP server](https://glama.ai/mcp/servers/salitaba/maven-decoder-mcp/badges/score.svg)](https://glama.ai/mcp/servers/salitaba/maven-decoder-mcp) 🐍 🏠 🍎 🪟 🐧 - Lets AI agents read the actual source of any Maven dependency — decompiles jars from `~/.m2` or Maven Central, and diffs versions for breaking changes. Works on artifacts with no sources jar via `javap`, and against a private Nexus or Artifactory. `npx skills add https://github.com/salitaba/maven-decoder-mcp --skill maven-code-search`
@@ -114,6 +115,12 @@ Two things about that list before you file:
   packages so coding agents stop writing code against outdated API knowledge." Same
   thesis, different ecosystem. That is fine, and it is evidence the category is real.
   Do not describe this project as the only one doing it.
+- Closer still, and in the *same* ecosystem: `terseprompts/jarp-mcp` on mcpservers.org —
+  "Give AI agents X-ray vision into compiled Java code by decompiling JAR/WAR/EAR files
+  and Maven/Gradle dependencies." Also `tangcent/maven-indexer-mcp`, which indexes `~/.m2`
+  and the Gradle cache for class and signature search. The differentiators to lead with
+  are version diffing, `javap` fallback for artifacts with no sources jar, and private
+  Nexus/Artifactory support — not "reads Maven dependencies", which is now crowded.
 
 ### `wong2/awesome-mcp-servers` — under `## Community Servers`
 
