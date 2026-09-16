@@ -92,6 +92,15 @@ version from `git tag --list | tail -1`.
 
 Ordered by leverage, not alphabetically. Do them over several days, not one afternoon.
 
+**What this table taught us, 2026-09-16.** "Ten targets" was the wrong mental model. Of
+the ten, three seed themselves from #1 (Glama auto-indexed, PulseMCP says it will, and
+mcp.so plausibly will), two are non-viable (mcp.so charges, Smithery is remote-only), one
+is retired, and one blocks outside PRs. The real free surface is the **Official MCP
+Registry plus two awesome lists** — everything else is downstream of the registry or not
+worth the effort. Publish to #1 on every release and most of this table maintains itself.
+Spend the saved time on the benchmark in `README.md`, which nothing downstream can
+replicate for you.
+
 | # | Target | Route | Notes | Status |
 |---|---|---|---|---|
 | 1 | MCP Server Registry | `mcp-publisher` CLI + `server.json` | Published 2026-09-09 as `io.github.salitaba/maven-decoder-mcp` v1.3.2, status `active`. Upstream of several directories, so give downstream lists a few days to seed before submitting by hand. | ☑ |
@@ -99,7 +108,7 @@ Ordered by leverage, not alphabetically. Do them over several days, not one afte
 | 3 | Glama MCP directory | web submit / auto-index | **Already auto-indexed** — listed under Developer Tools / Code Analysis, Python + Local, badge URL resolves. Do not submit by hand. Optionally "Claim" the server to get the admin panel. | ☑ |
 | 4 | `wong2/awesome-mcp-servers` | PR to `main`, `## Community Servers` | 4.3k stars. Different format from #2 — do not paste the same line. **Blocked: must be opened by hand in a browser.** Branch ready and pushed: `salitaba/awesome-mcp-servers-1` @ `add-maven-decoder`. `gh pr create` fails with `salitaba does not have the correct permissions to execute CreatePullRequest`; fork parent, base and head all verified correct, and the same token filed #2 seconds earlier, so it is upstream interaction limits, not auth. | ☐ |
 | 5 | mcp.so | **paid listing** | **Deprioritized — costs money.** Publishing requires payment (found 2026-09-16), so this is a spend decision, not a task. Recommend skipping: #1 is upstream and several directories seed from it, so a free index is plausible — that is how Glama ended up listed without a manual submission. Revisit only if the fee is trivial and the free channels are exhausted. Confirmed absent 2026-09-09. | ☐ |
-| 6 | PulseMCP | web submit | Presence unverified — the site 403s scripted requests, so check by hand in a browser before submitting. | ☐ |
+| 6 | PulseMCP | auto-seeds from #1 | **No action needed.** Submissions paused indefinitely as of their 2026-09-03 notice (directory pipeline overhaul, no reopen date given). Their own guidance: publish to the Official MCP Registry and "we will pick it up automatically once we are back" — which #1 already did on 2026-09-09. Do not wait on this; it resolves by itself. | ☑ |
 | 7 | mcpservers.org | web submit | **Submitted by hand 2026-09-16, awaiting listing** — not yet verified as live. Was confirmed absent 2026-09-09 (six `maven` results, none ours; nearest is `terseprompts/jarp-mcp`). Category: Development. Re-check the listing before ticking this. | ◐ |
 | 8 | Smithery | registry submit | **Poor fit — deprioritize.** Its registry is effectively remote-server-only; every result carries `remote: true`, and this server is stdio/local. Revisit only if Smithery adds local-package listings. | ☐ |
 | 9 | Cursor MCP directory | submit | Repo already ships `cursor_mcp_config_template.json`. Link it. | ☐ |
