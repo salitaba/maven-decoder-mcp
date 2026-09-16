@@ -93,20 +93,27 @@ version from `git tag --list | tail -1`.
 Ordered by leverage, not alphabetically. Do them over several days, not one afternoon.
 
 **What this table taught us, 2026-09-16.** "Ten targets" was the wrong mental model. Of
-the ten, three seed themselves from #1 (Glama auto-indexed, PulseMCP says it will, and
-mcp.so plausibly will), two are non-viable (mcp.so charges, Smithery is remote-only), one
-is retired, and one blocks outside PRs. The real free surface is the **Official MCP
-Registry plus two awesome lists** — everything else is downstream of the registry or not
-worth the effort. Publish to #1 on every release and most of this table maintains itself.
-Spend the saved time on the benchmark in `README.md`, which nothing downstream can
-replicate for you.
+the ten: three seed themselves from #1 (Glama auto-indexed, PulseMCP says it will, and
+mcp.so plausibly will), and four are simply not available — mcp.so charges, Smithery is
+remote-only, `modelcontextprotocol/servers` is retired, and `wong2` has disabled pull
+requests and issues outright.
+
+What is left is the **Official MCP Registry, one awesome list (`punkpeye`), skills.sh,
+and mcpservers.org.** That is the whole free surface, and half of it maintains itself.
+Publish to #1 on every release and the downstream directories follow.
+
+The strategic read: directory submission is a nearly finished, low-ceiling channel that
+took far more research than it returned, and it is contested — `terseprompts/jarp-mcp`
+and `tangcent/maven-indexer-mcp` are already in these same lists. The benchmark in
+`README.md` is the only remaining item nothing downstream can replicate, and it is where
+the effort should go next.
 
 | # | Target | Route | Notes | Status |
 |---|---|---|---|---|
 | 1 | MCP Server Registry | `mcp-publisher` CLI + `server.json` | Published 2026-09-09 as `io.github.salitaba/maven-decoder-mcp` v1.3.2, status `active`. Upstream of several directories, so give downstream lists a few days to seed before submitting by hand. | ☑ |
 | 2 | `punkpeye/awesome-mcp-servers` | PR to `main`, `README.md` | 94k stars, the highest-traffic list. Format is strict — see below. Filed 2026-09-16 as [punkpeye/awesome-mcp-servers#14525](https://github.com/punkpeye/awesome-mcp-servers/pull/14525), awaiting review. Title carries the `🤖🤖🤖` agent marker their CONTRIBUTING.md asks for. | ☑ |
 | 3 | Glama MCP directory | web submit / auto-index | **Already auto-indexed** — listed under Developer Tools / Code Analysis, Python + Local, badge URL resolves. Do not submit by hand. Optionally "Claim" the server to get the admin panel. | ☑ |
-| 4 | `wong2/awesome-mcp-servers` | PR to `main`, `## Community Servers` | 4.3k stars. Different format from #2 — do not paste the same line. **Blocked: must be opened by hand in a browser.** Branch ready: `salitaba/awesome-mcp-servers-1` @ `add-maven-decoder`, rebuilt 2026-09-16 on `upstream/main` and verified `ahead: 1, behind: 0, files: 1`. Tried GraphQL twice and REST once: GraphQL says `salitaba does not have the correct permissions to execute CreatePullRequest`, REST masks it as `404 Not Found` on `POST /pulls`. Fork parent, base, head and ancestry all check out, `interaction-limits` is admin-only so it cannot be read, and the same token filed #2 minutes earlier — so the restriction is specific to this repo, not auth. Open it from the compare page instead. | ☐ |
+| 4 | `wong2/awesome-mcp-servers` | **do not file** | **Dead target — the owner has disabled pull requests on the repo.** The compare page confirms the branch is mergeable ("Able to merge") and then refuses: "An owner of this repository has disabled the ability to open pull requests." Issues are disabled too (`has_issues: false`), no PR has ever been merged, and the repo has not been pushed since 2026-07-13. There is no route in and nobody to ask. Branch `salitaba/awesome-mcp-servers-1` @ `add-maven-decoder` is clean and rebased on `upstream/main` if it ever reopens. | ✗ |
 
 > **Trap, learned the hard way.** Do not `git clone --depth 1` a fork you intend to
 > amend and force-push. The shallow graft leaves the pushed branch with no common
