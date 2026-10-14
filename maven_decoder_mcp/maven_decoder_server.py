@@ -717,53 +717,50 @@ class MavenDecoderServer:
 
         try:
             logger.debug(f"Scanning Maven repository: {self.maven_home}")
-            group_dirs = [p for p in self.maven_home.iterdir() if p.is_dir()]
-            logger.debug(f"Found {len(group_dirs)} top-level directories")
-            
-            for group_path in group_dirs:
-                group_name = group_path.name
+            # A group ID maps to one directory per dot-separated segment
+            # (org.springframework -> org/springframework), so the group is
+            # everything above <artifact>/<version>/, not just the top level.
+            version_dirs = sorted({jar.parent for jar in self.maven_home.rglob("*.jar")})
+            logger.debug(f"Found {len(version_dirs)} directories containing jar files")
+
+            for version_dir in version_dirs:
+                artifact_dir = version_dir.parent
+                group_path = artifact_dir.parent
+                # Need at least <group>/<artifact>/<version>/ under the repo root.
+                if len(version_dir.relative_to(self.maven_home).parts) < 3:
+                    continue
+
+                group_name = self._path_to_group_id(group_path)
                 if group_id and group_id not in group_name:
                     continue
-                
-                # Look for artifact directories within this group
-                for artifact_dir in group_path.iterdir():
-                    if not artifact_dir.is_dir():
-                        continue
-                    
-                    artifact_name = artifact_dir.name
-                    if artifact_id and artifact_id not in artifact_name:
-                        continue
-                    
-                    # Look for version directories within this artifact
-                    for version_dir in artifact_dir.iterdir():
-                        if not version_dir.is_dir():
-                            continue
-                        
-                        version_name = version_dir.name
-                        if version and version not in version_name:
-                            continue
-                        
-                        # Check if this version directory contains jar files
-                        jar_files = list(version_dir.glob("*.jar"))
-                        if jar_files:
-                            stats = [f.stat() for f in jar_files]
-                            size_bytes = sum(s.st_size for s in stats)
-                            mtime = max(s.st_mtime for s in stats)
-                            artifacts.append({
-                                "group_id": self._path_to_group_id(group_path),
-                                "artifact_id": artifact_name,
-                                "version": version_name,
-                                "jar_files": [f.name for f in jar_files],
-                                "size_bytes": size_bytes,
-                                "last_modified": datetime.fromtimestamp(
-                                    mtime, timezone.utc
-                                ).astimezone().isoformat(),
-                                "path": str(version_dir),
-                                # Sort key only: comparing floats is cheaper and
-                                # exact, where the ISO string above is for
-                                # display. Removed before output.
-                                "_mtime": mtime,
-                            })
+
+                artifact_name = artifact_dir.name
+                if artifact_id and artifact_id not in artifact_name:
+                    continue
+
+                version_name = version_dir.name
+                if version and version not in version_name:
+                    continue
+
+                jar_files = list(version_dir.glob("*.jar"))
+                stats = [f.stat() for f in jar_files]
+                size_bytes = sum(s.st_size for s in stats)
+                mtime = max(s.st_mtime for s in stats)
+                artifacts.append({
+                    "group_id": group_name,
+                    "artifact_id": artifact_name,
+                    "version": version_name,
+                    "jar_files": [f.name for f in jar_files],
+                    "size_bytes": size_bytes,
+                    "last_modified": datetime.fromtimestamp(
+                        mtime, timezone.utc
+                    ).astimezone().isoformat(),
+                    "path": str(version_dir),
+                    # Sort key only: comparing floats is cheaper and
+                    # exact, where the ISO string above is for
+                    # display. Removed before output.
+                    "_mtime": mtime,
+                })
 
             # Sort the full result set before slicing so the returned page
             # reflects the requested order. Filesystem iteration order is

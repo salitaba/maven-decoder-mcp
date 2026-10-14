@@ -486,6 +486,45 @@ class TestListArtifactsSorting:
         # total_found reports every match, not just the returned page.
         assert payload["total_found"] == 3
 
+    def _make_jar(self, server, group_path, artifact_id, version):
+        jar_path = (
+            server.maven_home
+            / group_path
+            / artifact_id
+            / version
+            / f"{artifact_id}-{version}.jar"
+        )
+        jar_path.parent.mkdir(parents=True, exist_ok=True)
+        jar_path.write_bytes(b"x")
+        return jar_path
+
+    @pytest.mark.asyncio
+    async def test_lists_dotted_group_ids(self, server):
+        """Group IDs with dots map to nested directories, as in a real ~/.m2."""
+        self._make_jar(server, "org/benf", "cfr", "0.152")
+        self._make_jar(server, "com/example", "app", "1.0")
+        self._make_jar(server, "junit", "junit", "4.13.2")
+        result = await server._list_artifacts()
+        payload = json.loads(result[0].text)
+        coords = [
+            (a["group_id"], a["artifact_id"], a["version"])
+            for a in payload["artifacts"]
+        ]
+        assert coords == [
+            ("com.example", "app", "1.0"),
+            ("junit", "junit", "4.13.2"),
+            ("org.benf", "cfr", "0.152"),
+        ]
+        assert payload["total_found"] == 3
+
+    @pytest.mark.asyncio
+    async def test_group_id_filter_matches_dotted_group(self, server):
+        self._make_jar(server, "org/benf", "cfr", "0.152")
+        self._make_jar(server, "com/example", "app", "1.0")
+        result = await server._list_artifacts(group_id="com.example")
+        payload = json.loads(result[0].text)
+        assert [a["artifact_id"] for a in payload["artifacts"]] == ["app"]
+
     @pytest.mark.asyncio
     async def test_last_modified_carries_utc_offset(self, server):
         self._build_repo(server)
